@@ -387,7 +387,12 @@ test('clinic hours, doctor availability and booking boundaries', async (t) => {
     const patient = await api('/patients', {
       method: 'POST',
       token: adminToken,
-      body: { firstName: 'Test', lastName: 'Patient', gender: 'FEMALE' },
+      body: {
+        firstName: 'Test',
+        lastName: 'Patient',
+        phone: '01000000001',
+        gender: 'FEMALE',
+      },
     });
     assert.equal(patient.status, 201, JSON.stringify(patient.body));
     patientId = patient.body.patient.id;

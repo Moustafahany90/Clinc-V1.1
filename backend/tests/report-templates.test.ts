@@ -151,6 +151,7 @@ before(async () => {
     body: {
       firstName: 'Synthetic',
       lastName: 'Patient',
+      phone: '01000000002',
       gender: 'FEMALE',
       acknowledgeDuplicates: true,
     },

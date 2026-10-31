@@ -31,7 +31,7 @@ const emptyForm = {
   firstName: '',
   lastName: '',
   phone: '',
-  email: '',
+  referringDoctor: '',
   dateOfBirth: '',
   gender: '',
   nationalId: '',
@@ -47,7 +47,7 @@ function formFromPatient(patient: Patient | null): PatientForm {
     firstName: patient.firstName,
     lastName: patient.lastName,
     phone: patient.phone ?? '',
-    email: patient.email ?? '',
+    referringDoctor: patient.referringDoctor ?? '',
     dateOfBirth: patient.dateOfBirth ? patient.dateOfBirth.slice(0, 10) : '',
     gender: patient.gender ?? '',
     nationalId: patient.nationalId ?? '',
@@ -94,13 +94,17 @@ export function PatientDialog({
       setError('First and last name are required.');
       return;
     }
+    if (!form.phone.trim()) {
+      setError('Phone number is required.');
+      return;
+    }
     setBusy(true);
     try {
       const payload = {
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
         phone: form.phone.trim(),
-        email: form.email.trim(),
+        referringDoctor: form.referringDoctor.trim(),
         dateOfBirth: form.dateOfBirth,
         ...(form.gender ? { gender: form.gender } : {}),
         nationalId: form.nationalId.trim(),
@@ -222,21 +226,27 @@ export function PatientDialog({
                   required
                 />
               </Field>
-              <Field label="Phone" htmlFor="patient-phone" hint="Optional. Used to find duplicate records.">
+              <Field
+                label="Phone"
+                htmlFor="patient-phone"
+                hint="Used to find duplicate records."
+                required
+              >
                 <Input
                   id="patient-phone"
                   type="tel"
                   value={form.phone}
                   onChange={(event) => update('phone', event.target.value)}
                   autoComplete="tel"
+                  required
                 />
               </Field>
-              <Field label="Email" htmlFor="patient-email" hint="Optional.">
+              <Field label="Referring doctor" htmlFor="patient-referring" hint="Optional.">
                 <Input
-                  id="patient-email"
-                  type="email"
-                  value={form.email}
-                  onChange={(event) => update('email', event.target.value)}
+                  id="patient-referring"
+                  value={form.referringDoctor}
+                  maxLength={120}
+                  onChange={(event) => update('referringDoctor', event.target.value)}
                 />
               </Field>
               <Field label="Date of birth" htmlFor="patient-dob">
@@ -268,7 +278,7 @@ export function PatientDialog({
                   onChange={(event) => update('nationalId', event.target.value)}
                 />
               </Field>
-              <Field label="Address" htmlFor="patient-address" className="sm:col-span-2">
+              <Field label="Address" htmlFor="patient-address" hint="Optional.">
                 <Textarea
                   id="patient-address"
                   value={form.address}

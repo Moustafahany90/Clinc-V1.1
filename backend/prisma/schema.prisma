@@ -299,7 +299,7 @@ model Patient {
   lastName        String
   phone           String?
   phoneNormalized String?
-  email           String?
+  referringDoctor String?
   dateOfBirth     DateTime? @db.Date
   gender          String?
   nationalId      String?

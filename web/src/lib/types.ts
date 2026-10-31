@@ -180,7 +180,7 @@ export interface Patient {
   firstName: string;
   lastName: string;
   phone: string | null;
-  email: string | null;
+  referringDoctor: string | null;
   dateOfBirth: string | null;
   gender: string | null;
   nationalId: string | null;

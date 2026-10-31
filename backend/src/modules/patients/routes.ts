@@ -27,7 +27,7 @@ const patientSelect = {
   firstName: true,
   lastName: true,
   phone: true,
-  email: true,
+  referringDoctor: true,
   dateOfBirth: true,
   gender: true,
   nationalId: true,
@@ -134,8 +134,8 @@ patientsRouter.get(
 const createPatientSchema = z.object({
   firstName: z.string().trim().min(1, 'First name is required').max(80),
   lastName: z.string().trim().min(1, 'Last name is required').max(80),
-  phone: z.string().trim().max(30).optional().or(z.literal('')),
-  email: z.string().trim().toLowerCase().email().optional().or(z.literal('')),
+  phone: z.string().trim().min(1, 'Phone number is required').max(30),
+  referringDoctor: z.string().trim().max(120).optional().or(z.literal('')),
   dateOfBirth: dateOnlySchema.optional().or(z.literal('')),
   gender: z.enum(['FEMALE', 'MALE', 'OTHER', 'UNSPECIFIED']).optional(),
   nationalId: z.string().trim().max(40).optional().or(z.literal('')),
@@ -192,7 +192,7 @@ patientsRouter.post(
           lastName: payload.lastName,
           phone: payload.phone || null,
           phoneNormalized,
-          email: payload.email || null,
+          referringDoctor: payload.referringDoctor || null,
           dateOfBirth: payload.dateOfBirth ? new Date(`${payload.dateOfBirth}T00:00:00Z`) : null,
           gender: payload.gender ?? null,
           nationalId: payload.nationalId || null,
@@ -263,7 +263,8 @@ patientsRouter.patch(
         phone,
         phoneNormalized:
           payload.phone === undefined ? undefined : normalisePhone(payload.phone),
-        email: payload.email === undefined ? undefined : payload.email || null,
+        referringDoctor:
+          payload.referringDoctor === undefined ? undefined : payload.referringDoctor || null,
         dateOfBirth:
           payload.dateOfBirth === undefined
             ? undefined

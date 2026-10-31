@@ -174,7 +174,6 @@ export function PatientDetailPage() {
             <span>{patient.phone ?? 'No phone number'}</span>
             {patient.dateOfBirth && <span>· {formatDateOnly(patient.dateOfBirth)}</span>}
             {patient.dateOfBirth && <span>· {ageFromDob(patient.dateOfBirth)}</span>}
-            {patient.email && <span>· {patient.email}</span>}
           </span>
         }
         actions={
@@ -244,7 +243,7 @@ export function PatientDetailPage() {
                     '—'
                   )}
                 </KeyValue>
-                <KeyValue label="Email">{patient.email ?? '—'}</KeyValue>
+                <KeyValue label="Referring doctor">{patient.referringDoctor ?? '—'}</KeyValue>
                 <KeyValue label="Date of birth">
                   {formatDateOnly(patient.dateOfBirth)}
                   {patient.dateOfBirth ? ` · ${ageFromDob(patient.dateOfBirth)}` : ''}
