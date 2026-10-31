@@ -14,7 +14,6 @@ import {
   DialogHeader,
   Field,
   Input,
-  Select,
   Textarea,
 } from './ui';
 
@@ -33,9 +32,6 @@ const emptyForm = {
   phone: '',
   referringDoctor: '',
   dateOfBirth: '',
-  gender: '',
-  nationalId: '',
-  address: '',
   notes: '',
 };
 
@@ -49,9 +45,6 @@ function formFromPatient(patient: Patient | null): PatientForm {
     phone: patient.phone ?? '',
     referringDoctor: patient.referringDoctor ?? '',
     dateOfBirth: patient.dateOfBirth ? patient.dateOfBirth.slice(0, 10) : '',
-    gender: patient.gender ?? '',
-    nationalId: patient.nationalId ?? '',
-    address: patient.address ?? '',
     notes: patient.notes ?? '',
   };
 }
@@ -106,9 +99,6 @@ export function PatientDialog({
         phone: form.phone.trim(),
         referringDoctor: form.referringDoctor.trim(),
         dateOfBirth: form.dateOfBirth,
-        ...(form.gender ? { gender: form.gender } : {}),
-        nationalId: form.nationalId.trim(),
-        address: form.address.trim(),
         notes: form.notes.trim(),
         ...(acknowledgeDuplicates ? { acknowledgeDuplicates: true } : {}),
       };
@@ -256,34 +246,6 @@ export function PatientDialog({
                   value={form.dateOfBirth}
                   max={new Date().toISOString().slice(0, 10)}
                   onChange={(event) => update('dateOfBirth', event.target.value)}
-                />
-              </Field>
-              <Field label="Gender" htmlFor="patient-gender">
-                <Select
-                  id="patient-gender"
-                  value={form.gender}
-                  onChange={(event) => update('gender', event.target.value)}
-                >
-                  <option value="">Not recorded</option>
-                  <option value="FEMALE">Female</option>
-                  <option value="MALE">Male</option>
-                  <option value="OTHER">Other</option>
-                  <option value="UNSPECIFIED">Unspecified</option>
-                </Select>
-              </Field>
-              <Field label="National ID" htmlFor="patient-national" hint="Optional.">
-                <Input
-                  id="patient-national"
-                  value={form.nationalId}
-                  onChange={(event) => update('nationalId', event.target.value)}
-                />
-              </Field>
-              <Field label="Address" htmlFor="patient-address" hint="Optional.">
-                <Textarea
-                  id="patient-address"
-                  value={form.address}
-                  onChange={(event) => update('address', event.target.value)}
-                  rows={2}
                 />
               </Field>
               <Field
