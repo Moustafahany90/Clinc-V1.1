@@ -1,0 +1,750 @@
+// Ultrasound Clinic Management System - data model
+// Rules encoded here:
+//  * Clinical rows carry an owning doctorId and are never clinic-wide readable.
+//  * Money is stored in integer minor units (piasters) - never floats.
+//  * Financial and clinical history is append-only; corrections create new rows.
+//  * No tax/VAT columns exist anywhere by design.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  RECEPTIONIST
+  DOCTOR
+}
+
+enum AppointmentStatus {
+  BOOKED
+  CONFIRMED
+  ARRIVED
+  WAITING
+  IN_EXAM
+  REPORT_REVIEW
+  DONE
+  CANCELLED
+  NO_SHOW
+}
+
+enum QueueStatus {
+  WAITING
+  CALLED
+  IN_EXAM
+  SKIPPED
+  DONE
+}
+
+enum VisitStatus {
+  DRAFT
+  IN_REVIEW
+  COMPLETED
+}
+
+enum ReportStatus {
+  DRAFT
+  FINALIZED
+  AMENDED
+}
+
+enum ReportDeliveryChannel {
+  WHATSAPP
+}
+
+enum ReportDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum PaymentStatus {
+  COMPLETED
+  VOIDED
+}
+
+enum LedgerEntryType {
+  CHARGE
+  PAYMENT
+  REFUND
+  ADJUSTMENT
+}
+
+// ---------------------------------------------------------------------------
+// Identity and access
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String  @id @default(uuid()) @db.Uuid
+  email        String  @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         Role
+  isActive     Boolean @default(true)
+  phone        String?
+
+  // Explicit capability grants. Role alone never implies clinical access.
+  // Values are validated against PERMISSIONS in src/lib/permissions.ts.
+  permissions String[] @default([])
+
+  mustChangePassword Boolean   @default(false)
+  // Bumped whenever every previously issued access token must stop working
+  // (password change, archive/restore, admin reset). Included in the JWT and
+  // compared on every authenticated request.
+  tokenVersion       Int       @default(0)
+  lastLoginAt        DateTime?
+  failedLoginCount   Int       @default(0)
+  lockedUntil        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refreshTokens       RefreshToken[]
+  passwordSetupTokens PasswordSetupToken[]
+  doctorAppointments  Appointment[]              @relation("DoctorAppointments")
+  createdAppointments Appointment[]              @relation("CreatedAppointments")
+  doctorVisits        Visit[]                    @relation("DoctorVisits")
+  createdPatients     Patient[]                  @relation("CreatedPatients")
+  reportsOwned        Report[]                   @relation("DoctorReports")
+  reportVersions      ReportVersion[]
+  reportDeliveries    ReportDelivery[]
+  measurements        Measurement[]
+  uploadedFiles       FileAsset[]
+  paymentsReceived    Payment[]
+  refundsIssued       Refund[]
+  expensesRecorded    Expense[]
+  auditLogs           AuditLog[]
+  statusChanges       AppointmentStatusHistory[]
+  queueEntries        QueueEntry[]               @relation("QueueDoctor")
+  createdQueueEntries QueueEntry[]               @relation("QueueCreatedBy")
+  chargesCreated      Charge[]
+  updateRequests      ReportUpdateRequest[]      @relation("UpdateRequestDoctor")
+  availability        DoctorAvailability[]
+  scheduleExceptions  ScheduleException[]        @relation("ScheduleExceptions")
+
+  @@index([role, isActive])
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  familyId   String    @db.Uuid
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?   @db.Uuid
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, revokedAt])
+  @@index([familyId])
+}
+
+/// Revoked access tokens (by jti) until their natural expiry.
+model TokenBlacklist {
+  jti       String   @id
+  userId    String   @db.Uuid
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model PasswordSetupToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  revokedAt   DateTime?
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Clinic configuration
+// ---------------------------------------------------------------------------
+
+model ClinicSettings {
+  id                        Int     @id @default(1)
+  name                      String  @default("Ultrasound Clinic")
+  legalName                 String?
+  phone                     String?
+  email                     String?
+  address                   String?
+  timezone                  String  @default("Africa/Cairo")
+  currency                  String  @default("EGP")
+  defaultAppointmentMinutes Int     @default(15)
+  slotIntervalMinutes       Int     @default(15)
+
+  emailEnabled      Boolean @default(false)
+  emailProvider     String  @default("smtp")
+  emailFromAddress  String?
+  dailyDoctorDigest Boolean @default(false)
+  digestSendHour    Int     @default(7)
+
+  setupCompletedAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+/// Clinic-wide opening template, one row per ISO weekday (1 = Mon ... 7 = Sun).
+model WorkingHours {
+  id               String  @id @default(uuid()) @db.Uuid
+  dayOfWeek        Int     @unique // 1..7 ISO
+  isOpen           Boolean @default(true)
+  // Minutes from midnight, clinic-local.
+  openMinute       Int     @default(780) // 13:00 Sat/Sun
+  closeMinute      Int     @default(1260) // 21:00
+  breakStartMinute Int?
+  breakEndMinute   Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Per-doctor override of the clinic template. Also 1..7.
+model DoctorAvailability {
+  id          String   @id @default(uuid()) @db.Uuid
+  doctorId    String   @db.Uuid
+  doctor      User     @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  dayOfWeek   Int
+  isWorking   Boolean  @default(true)
+  openMinute  Int      @default(780)
+  closeMinute Int      @default(1260)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([doctorId, dayOfWeek])
+}
+
+/// Date-specific closure or extra shift. clinic-local date stored at 00:00Z of that date.
+model ScheduleException {
+  id          String   @id @default(uuid()) @db.Uuid
+  doctorId    String?  @db.Uuid
+  doctor      User?    @relation("ScheduleExceptions", fields: [doctorId], references: [id], onDelete: Cascade)
+  date        DateTime @db.Date
+  isClosed    Boolean  @default(true)
+  openMinute  Int?
+  closeMinute Int?
+  reason      String?
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+
+  @@index([date])
+  @@index([doctorId, date])
+}
+
+model Service {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String   @unique
+  durationMinutes Int      @default(15)
+  priceMinor      Int      @default(0)
+  description     String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  appointments Appointment[]
+  charges      Charge[]
+  reports      Report[]
+}
+
+model PaymentMethod {
+  id                String   @id @default(uuid()) @db.Uuid
+  key               String   @unique
+  label             String
+  requiresReference Boolean  @default(false)
+  isActive          Boolean  @default(true)
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  payments Payment[]
+  expenses Expense[]
+}
+
+model ExpenseCategory {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  expenses Expense[]
+}
+
+// ---------------------------------------------------------------------------
+// Patients
+// ---------------------------------------------------------------------------
+
+model Patient {
+  id              String    @id @default(uuid()) @db.Uuid
+  patientNumber   String    @unique
+  firstName       String
+  lastName        String
+  phone           String?
+  phoneNormalized String?
+  email           String?
+  dateOfBirth     DateTime? @db.Date
+  gender          String?
+  nationalId      String?
+  address         String?
+  notes           String?
+  isActive        Boolean   @default(true)
+
+  createdById String? @db.Uuid
+  createdBy   User?   @relation("CreatedPatients", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  appointments     Appointment[]
+  visits           Visit[]
+  charges          Charge[]
+  payments         Payment[]
+  refunds          Refund[]
+  files            FileAsset[]
+  auditLogs        AuditLog[]
+  queueEntries     QueueEntry[]
+  reportDeliveries ReportDelivery[]
+
+  @@index([phoneNormalized])
+  @@index([lastName, firstName])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Scheduling and queue
+// ---------------------------------------------------------------------------
+
+model Appointment {
+  id        String   @id @default(uuid()) @db.Uuid
+  patientId String   @db.Uuid
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctorId  String   @db.Uuid
+  doctor    User     @relation("DoctorAppointments", fields: [doctorId], references: [id], onDelete: Restrict)
+  serviceId String?  @db.Uuid
+  service   Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  startAt         DateTime
+  endAt           DateTime
+  durationMinutes Int
+  status          AppointmentStatus @default(BOOKED)
+
+  reason             String?
+  notes              String?
+  cancellationReason String?
+  isManualOverride   Boolean @default(false)
+  overrideReason     String?
+
+  createdById String? @db.Uuid
+  createdBy   User?   @relation("CreatedAppointments", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  statusHistory AppointmentStatusHistory[]
+  queueEntry    QueueEntry?
+  visit         Visit?
+  charge        Charge?
+
+  @@index([doctorId, startAt])
+  @@index([patientId, startAt])
+  @@index([startAt])
+  @@index([status])
+}
+
+model AppointmentStatusHistory {
+  id            String             @id @default(uuid()) @db.Uuid
+  appointmentId String             @db.Uuid
+  appointment   Appointment        @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  fromStatus    AppointmentStatus?
+  toStatus      AppointmentStatus
+  changedById   String?            @db.Uuid
+  changedBy     User?              @relation(fields: [changedById], references: [id], onDelete: SetNull)
+  reason        String?
+  createdAt     DateTime           @default(now())
+
+  @@index([appointmentId, createdAt])
+}
+
+model QueueEntry {
+  id            String      @id @default(uuid()) @db.Uuid
+  appointmentId String      @unique @db.Uuid
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patientId     String      @db.Uuid
+  patient       Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId      String      @db.Uuid
+  doctor        User        @relation("QueueDoctor", fields: [doctorId], references: [id], onDelete: Restrict)
+  // Clinic-local day, stored at 00:00Z of that date.
+  queueDate     DateTime    @db.Date
+  status        QueueStatus @default(WAITING)
+  position      Int?
+  arrivedAt     DateTime?
+  calledAt      DateTime?
+  examStartedAt DateTime?
+  examEndedAt   DateTime?
+  skipReason    String?
+  createdById   String?     @db.Uuid
+  createdBy     User?       @relation("QueueCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([queueDate, doctorId, status])
+  @@index([queueDate, status])
+}
+
+// ---------------------------------------------------------------------------
+// Clinical - doctor scoped. Every query must filter by doctorId.
+// ---------------------------------------------------------------------------
+
+model Visit {
+  id            String       @id @default(uuid()) @db.Uuid
+  patientId     String       @db.Uuid
+  patient       Patient      @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctorId      String       @db.Uuid
+  doctor        User         @relation("DoctorVisits", fields: [doctorId], references: [id], onDelete: Restrict)
+  appointmentId String?      @unique @db.Uuid
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  visitDate       DateTime    @default(now())
+  status          VisitStatus @default(DRAFT)
+  chiefComplaint  String?
+  examinationType String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reports      Report[]
+  measurements Measurement[]
+  files        FileAsset[]
+
+  @@index([doctorId, visitDate])
+  @@index([patientId, visitDate])
+}
+
+model ReportTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  serviceId   String?  @db.Uuid
+  description String?
+  // Ordered field definitions: [{ key, label, type, required, placeholder }]
+  fields      Json
+  // Print layout options: headerNote, footerNote, showMeasurements, showSignature
+  layout      Json?
+  isActive    Boolean  @default(true)
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  reports Report[]
+
+  @@index([isDefault])
+}
+
+model Report {
+  id               String          @id @default(uuid()) @db.Uuid
+  visitId          String          @db.Uuid
+  visit            Visit           @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  doctorId         String          @db.Uuid
+  doctor           User            @relation("DoctorReports", fields: [doctorId], references: [id], onDelete: Restrict)
+  // Composite ownership guard enforced by application + indexes.
+  templateId       String?         @db.Uuid
+  template         ReportTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  // Immutable copy of the template as it existed when this report was created
+  // (or finalized). Later template edits must not change historical reports.
+  templateSnapshot Json?
+  templateVersion  String?
+  serviceId        String?         @db.Uuid
+  service          Service?        @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  status         ReportStatus @default(DRAFT)
+  versionNumber  Int          @default(1)
+  currentContent Json
+  finalizedAt    DateTime?
+  finalizedById  String?      @db.Uuid
+  lastAmendedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions       ReportVersion[]
+  files          FileAsset[]
+  updateRequests ReportUpdateRequest[]
+  deliveries     ReportDelivery[]
+
+  @@index([doctorId, status])
+  @@index([visitId])
+}
+
+model ReportVersion {
+  id            String   @id @default(uuid()) @db.Uuid
+  reportId      String   @db.Uuid
+  report        Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  versionNumber Int
+  content       Json
+  isFinal       Boolean  @default(false)
+  authorId      String   @db.Uuid
+  author        User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  @@unique([reportId, versionNumber])
+  @@index([reportId, createdAt])
+}
+
+/// Reception may never see clinical content; this lets a doctor request a
+/// correction without exposing the report body.
+model ReportUpdateRequest {
+  id         String    @id @default(uuid()) @db.Uuid
+  reportId   String    @db.Uuid
+  report     Report    @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  doctorId   String    @db.Uuid
+  doctor     User      @relation("UpdateRequestDoctor", fields: [doctorId], references: [id], onDelete: Cascade)
+  status     String    @default("OPEN")
+  message    String
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([doctorId, status])
+}
+
+/// Delivery attempts for finalized clinical documents. The generated PDF is
+/// never persisted here; only provider identifiers and a masked recipient are
+/// stored so duplicate sends can be prevented and failures audited safely.
+model ReportDelivery {
+  id                String                @id @default(uuid()) @db.Uuid
+  reportId          String                @db.Uuid
+  report            Report                @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  patientId         String                @db.Uuid
+  patient           Patient               @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  sentById          String                @db.Uuid
+  sentBy            User                  @relation(fields: [sentById], references: [id], onDelete: Restrict)
+  versionNumber     Int
+  channel           ReportDeliveryChannel @default(WHATSAPP)
+  status            ReportDeliveryStatus  @default(PENDING)
+  provider          String                @default("META_CLOUD")
+  recipientLast4    String
+  providerMessageId String?
+  errorCode         String?
+  errorMessage      String?
+  attempts          Int                   @default(0)
+  lastAttemptAt     DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@unique([reportId, versionNumber, channel])
+  @@index([patientId, createdAt])
+  @@index([status, updatedAt])
+}
+
+model Measurement {
+  id         String   @id @default(uuid()) @db.Uuid
+  visitId    String   @db.Uuid
+  visit      Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  doctorId   String   @db.Uuid
+  doctor     User     @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  label      String
+  value      String
+  unit       String?
+  measuredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([visitId])
+  @@index([doctorId])
+}
+
+model FileAsset {
+  id           String   @id @default(uuid()) @db.Uuid
+  patientId    String?  @db.Uuid
+  patient      Patient? @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  visitId      String?  @db.Uuid
+  visit        Visit?   @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  reportId     String?  @db.Uuid
+  report       Report?  @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  doctorId     String?  @db.Uuid
+  uploadedById String   @db.Uuid
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  originalName String
+  storedName   String   @unique
+  mimeType     String
+  sizeBytes    Int
+  checksum     String?
+  kind         String   @default("CLINICAL")
+  createdAt    DateTime @default(now())
+
+  @@index([patientId])
+  @@index([visitId])
+  @@index([reportId])
+  @@index([doctorId])
+}
+
+// ---------------------------------------------------------------------------
+// Finance - money in integer piasters. Charges are not payments.
+// ---------------------------------------------------------------------------
+
+model Charge {
+  id            String       @id @default(uuid()) @db.Uuid
+  patientId     String       @db.Uuid
+  patient       Patient      @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  visitId       String?      @db.Uuid
+  appointmentId String?      @unique @db.Uuid
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  serviceId     String?      @db.Uuid
+  service       Service?     @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  description String
+  amountMinor Int
+  status      String    @default("OPEN") // OPEN | SETTLED | VOID
+  voidReason  String?
+  voidedAt    DateTime?
+
+  createdById String?  @db.Uuid
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  allocations PaymentAllocation[]
+
+  @@index([patientId, createdAt])
+  @@index([status])
+}
+
+model Payment {
+  id             String        @id @default(uuid()) @db.Uuid
+  patientId      String        @db.Uuid
+  patient        Patient       @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  methodKey      String
+  method         PaymentMethod @relation(fields: [methodKey], references: [key], onDelete: Restrict)
+  amountMinor    Int
+  reference      String?
+  notes          String?
+  status         PaymentStatus @default(COMPLETED)
+  visitId        String?       @db.Uuid
+  idempotencyKey String?       @unique
+  receivedById   String        @db.Uuid
+  receivedBy     User          @relation(fields: [receivedById], references: [id], onDelete: Restrict)
+  receivedAt     DateTime      @default(now())
+  voidedAt       DateTime?
+  voidReason     String?
+  createdAt      DateTime      @default(now())
+
+  allocations PaymentAllocation[]
+  refunds     Refund[]
+
+  @@index([patientId, receivedAt])
+  @@index([receivedAt])
+  @@index([methodKey])
+}
+
+model PaymentAllocation {
+  id          String   @id @default(uuid()) @db.Uuid
+  paymentId   String   @db.Uuid
+  payment     Payment  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  chargeId    String   @db.Uuid
+  charge      Charge   @relation(fields: [chargeId], references: [id], onDelete: Restrict)
+  amountMinor Int
+  createdAt   DateTime @default(now())
+
+  @@unique([paymentId, chargeId])
+  @@index([chargeId])
+}
+
+model Refund {
+  id           String   @id @default(uuid()) @db.Uuid
+  paymentId    String   @db.Uuid
+  payment      Payment  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  patientId    String   @db.Uuid
+  patient      Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  amountMinor  Int
+  reason       String
+  refundedById String   @db.Uuid
+  refundedBy   User     @relation(fields: [refundedById], references: [id], onDelete: Restrict)
+  refundedAt   DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  @@index([patientId, refundedAt])
+}
+
+model Expense {
+  id             String          @id @default(uuid()) @db.Uuid
+  expenseDate    DateTime        @db.Date
+  amountMinor    Int
+  categoryId     String          @db.Uuid
+  category       ExpenseCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  description    String
+  methodKey      String?
+  method         PaymentMethod?  @relation(fields: [methodKey], references: [key], onDelete: SetNull)
+  reference      String?
+  idempotencyKey String?         @unique
+  status         String          @default("RECORDED") // RECORDED | VOID
+  voidReason     String?
+  voidedAt       DateTime?
+  recordedById   String          @db.Uuid
+  recordedBy     User            @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([expenseDate])
+  @@index([categoryId])
+}
+
+// ---------------------------------------------------------------------------
+// Audit and operational support
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String?
+  patientId  String?  @db.Uuid
+  patient    Patient? @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  metadata   Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+}
+
+model Sequence {
+  name  String @id
+  value Int    @default(0)
+}
+
+model EmailLog {
+  id        String    @id @default(uuid()) @db.Uuid
+  toAddress String
+  subject   String
+  template  String
+  status    String    @default("PENDING") // PENDING | SENT | FAILED | SKIPPED
+  error     String?
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@index([createdAt])
+}

@@ -1,0 +1,24 @@
+# Production TLS front door.
+#
+# Usage:
+#   CLINIC_DOMAIN=clinic.example.com docker compose \
+#     -f docker-compose.yml -f docker-compose.tls.yml up -d --build
+#
+# Caddy obtains and renews a public certificate automatically. The web and
+# backend ports stay bound to 127.0.0.1 in the base compose file; only Caddy is
+# exposed on 80/443. For a purely internal LAN hostname without public DNS, add
+# `tls internal` inside the site block and distribute Caddy's root CA to the
+# clinic devices.
+#
+# APP_ORIGIN must be https://<CLINIC_DOMAIN> and COOKIE_SECURE=true when
+# NODE_ENV=production; the backend refuses to start otherwise.
+
+{$CLINIC_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+	reverse_proxy web:80 {
+		header_up X-Real-IP {remote_host}
+	}
+}

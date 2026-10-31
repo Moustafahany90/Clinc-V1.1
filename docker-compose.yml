@@ -1,0 +1,184 @@
+name: ultrasound-clinic
+
+# All resources are project-scoped and independent from any other application.
+# The host database port is intentionally non-standard (see POSTGRES_PORT).
+
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ultrasound_clinic}
+      POSTGRES_USER: ${POSTGRES_USER:-clinic_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Deterministic clinic-local timestamps where Postgres is involved.
+      TZ: ${APP_TIMEZONE:-Africa/Cairo}
+      PGTZ: ${APP_TIMEZONE:-Africa/Cairo}
+    ports:
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-clinic_app} -d ${POSTGRES_DB:-ultrasound_clinic}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - clinic_net
+    logging: *default-logging
+
+  # Applies committed migrations before the API starts. Never seeds production
+  # data automatically; run `npm run seed` explicitly when defaults are wanted.
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: build
+    restart: "no"
+    command: ["npx", "prisma", "migrate", "deploy"]
+    environment:
+      NODE_ENV: production
+      # Compose builds this from the POSTGRES_* values so changing the database
+      # password cannot leave a stale URL behind. Use only URL-safe generated
+      # passwords (base64url or hex).
+      DATABASE_URL: postgresql://${POSTGRES_USER:-clinic_app}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ultrasound_clinic}?schema=public
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - clinic_net
+    logging: *default-logging
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-clinic_app}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ultrasound_clinic}?schema=public
+      APP_NAME: ${APP_NAME:-Ultrasound Clinic}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Africa/Cairo}
+      APP_CURRENCY: ${APP_CURRENCY:-EGP}
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8080}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
+      REFRESH_TOKEN_TTL_DAYS: ${REFRESH_TOKEN_TTL_DAYS:-30}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      TRUST_PROXY: ${TRUST_PROXY:-1}
+      BODY_LIMIT: ${BODY_LIMIT:-2mb}
+      UPLOAD_DIR: /app/storage/uploads
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+      EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-Ultrasound Clinic <no-reply@example.com>}
+      GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
+      GRAPH_SENDER: ${GRAPH_SENDER:-}
+      EVOLUTION_API_ENABLED: ${EVOLUTION_API_ENABLED:-false}
+      EVOLUTION_API_URL: ${EVOLUTION_API_URL:-http://evolution:8080}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-ultrasound_clinic}
+      EVOLUTION_API_TIMEOUT_MS: ${EVOLUTION_API_TIMEOUT_MS:-30000}
+      EVOLUTION_DEFAULT_COUNTRY_CODE: ${EVOLUTION_DEFAULT_COUNTRY_CODE:-20}
+    volumes:
+      - clinic_storage:/app/storage
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - clinic_net
+    logging: *default-logging
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - clinic_net
+    logging: *default-logging
+
+  evolution:
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SERVER_TYPE: http
+      SERVER_PORT: 8080
+      SERVER_URL: http://evolution:8080
+      AUTHENTICATION_TYPE: apikey
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:-clinic_app}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ultrasound_clinic}?schema=evolution
+      DATABASE_CONNECTION_CLIENT_NAME: clinic_evolution
+      CACHE_REDIS_ENABLED: "false"
+      CACHE_LOCAL_ENABLED: "true"
+      LOG_LEVEL: "ERROR,WARN,INFO"
+    ports:
+      - "127.0.0.1:8085:8080"
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - clinic_net
+    logging: *default-logging
+
+volumes:
+  db_data:
+    name: ultrasound_clinic_db_data
+  clinic_storage:
+    name: ultrasound_clinic_storage
+  evolution_instances:
+    name: ultrasound_clinic_evolution_instances
+
+networks:
+  clinic_net:
+    name: ultrasound_clinic_net
+    driver: bridge

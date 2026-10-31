@@ -1,0 +1,25 @@
+# Decisions
+
+- Node 22 LTS pinned in Docker images and CI; local Node 24 is also supported.
+- Local Postgres in Docker on non-default host port 55432.
+- PDF approach: print-optimized HTML + browser print for the interactive report, plus a dependency-light server-side PDFKit renderer for WhatsApp delivery. The PDF mirrors the pinned report snapshot, measurements and layout notes; it is generated on demand and never persisted.
+- UUID PKs; integer piasters for all money amounts.
+- Permissions are explicit String arrays. Clinical permissions are never implied by ADMIN; receptionist clinical permissions are stripped server-side.
+- Refresh tokens are opaque, SHA-256 hashed, stored in httpOnly cookie uc_refresh with path /api/v1/auth. Rotation with family revocation.
+- Passwords hashed with scrypt (scrypt$N$r$p$salt$hash).
+- Appointment conflict defence: pg_advisory_xact_lock(hashtext(doctorId)) plus exclusion constraint appointment_no_doctor_overlap.
+- Refunds capped at payment.amount - alreadyRefunded. Unallocated may go negative.
+- Default hours: Sat/Sun 13:00-21:00, Mon-Wed 14:30-21:00, Thu/Fri closed until configured.
+- Git branches are phase-scoped; never force-push, delete data, reset migrations, or merge to main without explicit approval.
+- Report content fields follow seeded template: indication, findings, measurements, impression, recommendations; configurable templates drive the editor.
+- API base /api/v1; frontend uses in-memory access token + httpOnly refresh cookie; downloads via axios blobs.
+- Money inputs parse decimal EGP strings to integer piasters via parseMoneyToMinor; display via formatMoney.
+- Access tokens carry a `tv` token version. Every request compares it with `User.tokenVersion`; password changes/resets, archive/restore and password setup bump the version so old access tokens die immediately. Logout also blacklists the token's `jti` until expiry.
+- Temporary-password accounts are gated server-side: only `/auth/me`, `/auth/change-password`, `/auth/logout` and session listing are reachable; everything else returns `403 PASSWORD_CHANGE_REQUIRED` until the password changes.
+- `APPOINTMENTS_OVERRIDE` and `VISITS_OVERRIDE` are explicit permissions, granted to ADMIN by role and backfilled by migration. They are required (plus a recorded reason) to book outside schedule, complete an appointment without the clinical workflow, or complete a visit without a finalized report.
+- Completed visits are immutable: visit metadata, measurements and new attachments are rejected. Finalized reports are amendment-only, and amendments use optimistic version checks to prevent lost updates.
+- Production fails closed on an HTTP `APP_ORIGIN`, insecure cookies, `TRUST_PROXY=0`, identical/placeholder JWT secrets, or an incomplete email provider. HSTS is enabled only in production.
+- Docker publishes only TLS proxy ports publicly; web/Postgres bind to loopback by default. Backups cover database and uploads, and the restore drill restores into a disposable `*_drill` database.
+- `/healthz` and `/api/v1/readyz` verify the database and expose audit-write failure counters; `/api/v1/health` remains a liveness-only endpoint.
+- Test-account passwords are supplied through `SEED_TEST_PASSWORD` / `SEED_TEMP_PASSWORD` and never committed or logged. Seeding refuses production unless `ALLOW_TEST_SEED=true`.
+- WhatsApp delivery is manual and finalized-report-only using Evolution API (WHATSAPP-BAILEYS with QR code pairing). It requires `REPORTS_SEND`, clinical read access, doctor report ownership, a patient phone on file, and explicit consent acknowledgement. The generated PDF is created on demand and not stored in clinic database, phone numbers are masked in delivery metadata, and all credentials remain on the server.

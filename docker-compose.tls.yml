@@ -1,0 +1,37 @@
+# Optional TLS overlay. Use together with docker-compose.yml:
+#   CLINIC_DOMAIN=clinic.example.com docker compose \
+#     -f docker-compose.yml -f docker-compose.tls.yml up -d --build
+#
+# The base stack binds web and db to 127.0.0.1 (the backend is only reachable
+# on the internal network). This overlay is the only public listener, terminating
+# TLS and proxying to the internal web service.
+
+services:
+  caddy:
+    image: caddy:2.11-alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      CLINIC_DOMAIN: ${CLINIC_DOMAIN:?set CLINIC_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - clinic_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  caddy_data:
+    name: ultrasound_clinic_caddy_data
+  caddy_config:
+    name: ultrasound_clinic_caddy_config
