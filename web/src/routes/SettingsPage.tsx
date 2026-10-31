@@ -549,7 +549,7 @@ function TimeInput({
   return (
     <input
       type="time"
-      value={minutesToLabel(Math.min(value, 1439))}
+      value={minutesToLabel(Math.min(value, 1439), false)}
       disabled={disabled}
       onChange={(event) => {
         const parsed = labelToMinutes(event.target.value);

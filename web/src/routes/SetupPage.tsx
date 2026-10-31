@@ -565,7 +565,7 @@ export function SetupPage({ onComplete }: { onComplete: () => void }) {
                           <input
                             type="time"
                             disabled={!day.isOpen}
-                            value={minutesToLabel(day.openMinute)}
+                            value={minutesToLabel(day.openMinute, false)}
                             onChange={(e) => {
                               const v = labelToMinutes(e.target.value);
                               if (v == null) return;
@@ -579,7 +579,7 @@ export function SetupPage({ onComplete }: { onComplete: () => void }) {
                           <input
                             type="time"
                             disabled={!day.isOpen}
-                            value={minutesToLabel(day.closeMinute)}
+                            value={minutesToLabel(day.closeMinute, false)}
                             onChange={(e) => {
                               const v = labelToMinutes(e.target.value);
                               if (v == null) return;

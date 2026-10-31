@@ -166,9 +166,9 @@ export function AppointmentDialog({
     if (!open || time) return;
     if (slots.length > 0) {
       const first = slots.find((slot) => slot.available) ?? slots[0];
-      setTime(minutesToLabel(first.minute));
+      setTime(minutesToLabel(first.minute, false));
     } else if (window?.isOpen) {
-      setTime(minutesToLabel(window.openMinute));
+      setTime(minutesToLabel(window.openMinute, false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, agendaState.data]);
@@ -688,7 +688,7 @@ export function AppointmentDialog({
                         size="sm"
                         variant="secondary"
                         onClick={() => {
-                          setTime(minutesToLabel(slot.minute));
+                          setTime(minutesToLabel(slot.minute, false));
                           setConflict(null);
                         }}
                       >

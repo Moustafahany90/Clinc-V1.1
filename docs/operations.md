@@ -70,49 +70,52 @@ running but cannot reach the database is unhealthy.
 
 ## WhatsApp report delivery
 
-This is optional and disabled unless `WHATSAPP_ENABLED=true`. Sending is a
+This is optional and disabled unless `EVOLUTION_API_ENABLED=true`. Sending is a
 manual action on a finalized report; there is no automatic send after
-finalization. The server generates a PDF from the pinned report snapshot,
-uploads it to Meta, sends it as a document or an approved document-header
-template, and stores only the provider message id, status and the recipient's
-last four digits. The PDF is not written to clinic storage.
+finalization. The server generates a PDF from the pinned report snapshot and
+sends it through the self-hosted Evolution API (WhatsApp/Baileys, QR pairing).
+Only the provider message id, status and the recipient's last four digits are
+stored with the delivery record; the PDF is not written to clinic storage.
 
-Required configuration:
+Required configuration (server side only, never exposed to the browser):
 
 ```dotenv
-WHATSAPP_ENABLED=true
-WHATSAPP_PHONE_NUMBER_ID=<Meta phone-number id>
-WHATSAPP_ACCESS_TOKEN=<Meta permanent/system-user token>
-WHATSAPP_API_VERSION=v23.0
-WHATSAPP_DEFAULT_COUNTRY_CODE=20
-WHATSAPP_GRAPH_BASE_URL=https://graph.facebook.com
+EVOLUTION_API_ENABLED=true
+EVOLUTION_API_URL=http://evolution:8080   # http://localhost:8085 when the backend runs outside Docker
+EVOLUTION_API_KEY=<shared secret; must equal AUTHENTICATION_API_KEY of the evolution service>
+EVOLUTION_INSTANCE_NAME=ultrasound_clinic
+EVOLUTION_API_TIMEOUT_MS=30000
+EVOLUTION_DEFAULT_COUNTRY_CODE=20
 ```
 
-Operational requirements:
+Setup and operation:
 
-- Use a dedicated Meta WhatsApp Business account and system-user token; never
-  commit the token or paste it into logs, screenshots or QR/session data.
+- `docker compose up -d evolution` starts Evolution API on `127.0.0.1:8085`
+  (container port 8080) and keeps the paired session in the
+  `ultrasound_clinic_evolution_instances` volume. Back that volume up whenever
+  the database is backed up; without it the phone must be paired again.
+- For local development the backend reads `backend/.env`, so set
+  `EVOLUTION_API_URL=http://localhost:8085` there and use the same
+  `EVOLUTION_API_KEY` as the root `.env`. Inside Docker the URL is
+  `http://evolution:8080`.
+- Pair the clinic phone from **Settings → WhatsApp delivery → Connect**, then
+  scan the QR code with WhatsApp on that phone. The status shows
+  `open` when the session is active. `Disconnect` logs the device out and
+  requires a new scan.
+- Keep `EVOLUTION_API_KEY` secret and rotate it if it is ever shared; never
+  paste it into logs, screenshots or tickets. Audit events do not include keys,
+  QR payloads or full phone numbers.
 - Obtain the clinic's patient-consent policy before enabling the feature. The
   UI requires a deliberate consent acknowledgement for every send.
-- Meta only allows free-form document messages inside a 24-hour customer-service
-  window. For business-initiated delivery outside that window, configure an
-  approved template with a document header:
-  ```dotenv
-  WHATSAPP_TEMPLATE_NAME=ultrasound_report
-  WHATSAPP_TEMPLATE_LANGUAGE=en_US
-  ```
-  The template must be approved in Meta Business Manager, include the document
-  header, and use no body placeholders (this integration does not send body
-  parameters). The clinic is responsible for template wording, consent and
-  local privacy requirements.
-- Patient phone numbers are converted to digits-only international form. A
-  missing or invalid number returns a validation error; no full number is
-  written to the delivery record or audit metadata.
+- Patient phone numbers are converted to digits-only international form using
+  `EVOLUTION_DEFAULT_COUNTRY_CODE`. A missing or invalid number returns a
+  validation error; no full number is written to the delivery record or audit
+  metadata.
 - Monitor `report.whatsapp_sent` / `report.whatsapp_failed` audit events. A
   failed provider call leaves a `FAILED` delivery row and can be retried from
   the report screen; a successful send requires an explicit resend confirmation.
-- Test with a synthetic patient and the clinic's WhatsApp test number before
-  enabling the feature for real patients. Never use a real report for testing.
+- Test with a synthetic patient and the clinic's test number before enabling
+  the feature for real patients. Never use a real report for testing.
 
 ## Backups
 

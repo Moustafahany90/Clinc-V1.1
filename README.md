@@ -20,7 +20,17 @@ JWT secrets).
 - Node.js 22 LTS (Vite 7 also accepts 20.19+ or 24+)
 - PostgreSQL 16 (or use Docker for DB only)
 
-### Backend
+### Both apps at once (recommended)
+```bash
+npm run setup        # installs dependencies for the root tooling, backend and web
+npm run db:up        # starts PostgreSQL only (docker compose; host port = POSTGRES_PORT in .env)
+npm run dev          # runs backend (:4000) and web (:5173) together
+```
+Other root scripts: `dev:web`, `dev:backend`, `build`, `typecheck`, `test`,
+`prisma:generate`, `prisma:migrate`, `prisma:deploy`, `prisma:studio`, `seed`,
+`db:down`.
+
+### Backend (standalone)
 ```bash
 cd backend
 npm install
@@ -31,7 +41,7 @@ npx prisma migrate dev
 npm run dev
 ```
 
-### Frontend
+### Frontend (standalone)
 ```bash
 cd web
 npm install
