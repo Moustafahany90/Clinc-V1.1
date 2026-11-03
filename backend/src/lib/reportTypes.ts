@@ -1,10 +1,11 @@
 export interface ReportTemplateField {
   key: string;
   label: string;
-  type: 'text' | 'textarea' | 'number' | 'date' | 'select';
+  type: 'text' | 'textarea' | 'number' | 'date' | 'select' | 'list';
   required?: boolean;
   visible?: boolean;
   placeholder?: string;
+  defaultValue?: string | string[];
 }
 
 export interface ReportTemplateLayout {
@@ -12,6 +13,7 @@ export interface ReportTemplateLayout {
   footerNote?: string;
   showMeasurements?: boolean;
   showSignature?: boolean;
+  printLayout?: 'default' | 'gyn4d';
 }
 
 export interface TemplateSnapshot {

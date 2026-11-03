@@ -22,7 +22,8 @@ import { authenticate, currentUser, requirePermission } from '../../middleware/a
 import { auditFromRequest } from '../../lib/audit.js';
 import { assertClinicalRead, assertClinicalWrite, forcedDoctorId } from '../../lib/clinical.js';
 import { getClinicSettings } from '../../lib/clinic.js';
-import { renderReportPdf } from '../../lib/reportPdf.js';
+import { renderReportPdf, type ReportPdfInput } from '../../lib/reportPdf.js';
+import { renderGyn4dHtml } from '../../lib/gyn4d.js';
 import {
   templateFieldsFromSnapshot,
   templateLayoutFromSnapshot,
@@ -66,10 +67,13 @@ const templateFieldSchema = z.object({
       'Field keys must start with a letter and use only letters, numbers and underscores.',
     ),
   label: z.string().trim().min(1).max(160),
-  type: z.enum(['text', 'textarea', 'number', 'date', 'select']).default('text'),
+  type: z.enum(['text', 'textarea', 'number', 'date', 'select', 'list']).default('text'),
   required: z.boolean().default(false),
   visible: z.boolean().optional(),
   placeholder: z.string().trim().max(200).optional(),
+  defaultValue: z
+    .union([z.string().max(2_000), z.array(z.string().max(2_000)).max(50)])
+    .optional(),
 });
 
 const templateFieldsSchema = z
@@ -95,6 +99,7 @@ const templateLayoutSchema = z.object({
   footerNote: z.string().trim().max(1000).optional(),
   showMeasurements: z.boolean().optional(),
   showSignature: z.boolean().optional(),
+  printLayout: z.enum(['default', 'gyn4d']).optional(),
 });
 
 const templateSchema = z.object({
@@ -124,6 +129,72 @@ function snapshotTemplate(template: {
     fields: template.fields,
     layout: template.layout,
     version: template.updatedAt.toISOString(),
+  };
+}
+
+type ReportForPdf = Prisma.ReportGetPayload<{
+  include: {
+    template: true;
+    visit: {
+      include: {
+        patient: true;
+        doctor: { select: { firstName: true; lastName: true } };
+        measurements: true;
+      };
+    };
+  };
+}>;
+
+async function buildPdfInput(report: ReportForPdf): Promise<ReportPdfInput> {
+  const snapshot =
+    report.templateSnapshot && typeof report.templateSnapshot === 'object'
+      ? (report.templateSnapshot as unknown as TemplateSnapshot)
+      : null;
+  const templateFields =
+    templateFieldsFromSnapshot(snapshot) ??
+    (Array.isArray(report.template?.fields)
+      ? (report.template.fields as unknown as ReturnType<typeof templateFieldsFromSnapshot>)
+      : null);
+  const templateLayout =
+    templateLayoutFromSnapshot(snapshot) ??
+    (report.template?.layout && typeof report.template.layout === 'object'
+      ? (report.template.layout as ReturnType<typeof templateLayoutFromSnapshot>)
+      : null);
+  const clinic = await getClinicSettings();
+  return {
+    clinic: {
+      name: clinic.name,
+      phone: clinic.phone,
+      email: clinic.email,
+      address: clinic.address,
+      timezone: clinic.timezone,
+    },
+    report: {
+      id: report.id,
+      status: report.status,
+      versionNumber: report.versionNumber,
+      finalizedAt: report.finalizedAt,
+      lastAmendedAt: report.lastAmendedAt,
+      content: report.currentContent as Record<string, unknown>,
+      templateName: snapshot?.name ?? report.template?.name ?? null,
+      templateVersion: report.templateVersion ?? snapshot?.version ?? null,
+      templateFields,
+      templateLayout,
+    },
+    patient: {
+      patientNumber: report.visit.patient.patientNumber,
+      firstName: report.visit.patient.firstName,
+      lastName: report.visit.patient.lastName,
+      dateOfBirth: report.visit.patient.dateOfBirth,
+      gender: report.visit.patient.gender,
+    },
+    examination: {
+      visitDate: report.visit.visitDate,
+      doctor: `${report.visit.doctor.firstName} ${report.visit.doctor.lastName}`,
+      examinationType: report.visit.examinationType,
+      chiefComplaint: report.visit.chiefComplaint,
+    },
+    measurements: report.visit.measurements,
   };
 }
 
@@ -787,6 +858,36 @@ reportsRouter.get(
   }),
 );
 
+/** Static HTML printout for fixed print layouts (currently the gyn4d design). */
+reportsRouter.get(
+  '/:id/print-html',
+  requirePermission('CLINICAL_READ'),
+  asyncHandler(async (req, res) => {
+    const { id } = parseParams(z.object({ id: uuidSchema }), req);
+    const me = currentUser(req);
+    const report = await prisma.report.findUnique({
+      where: { id },
+      include: {
+        template: true,
+        visit: {
+          include: {
+            patient: true,
+            doctor: { select: { firstName: true, lastName: true } },
+            measurements: { orderBy: { measuredAt: 'asc' } },
+          },
+        },
+      },
+    });
+    if (!report) throw notFound('Report not found');
+    assertClinicalRead(me, report.doctorId);
+    const input = await buildPdfInput(report);
+    if (input.report.templateLayout?.printLayout !== 'gyn4d') {
+      throw badRequest('This report uses the standard print layout.');
+    }
+    res.type('html').send(renderGyn4dHtml(input));
+  }),
+);
+
 const sendWhatsAppSchema = z.object({
   // Deliberate acknowledgement that clinical information is leaving the
   // clinic through a third-party messaging service.
@@ -951,58 +1052,9 @@ reportsRouter.post(
       }
     }
 
-    const snapshot =
-      report.templateSnapshot && typeof report.templateSnapshot === 'object'
-        ? (report.templateSnapshot as unknown as TemplateSnapshot)
-        : null;
-    const templateFields =
-      templateFieldsFromSnapshot(snapshot) ??
-      (Array.isArray(report.template?.fields)
-        ? (report.template.fields as unknown as ReturnType<typeof templateFieldsFromSnapshot>)
-        : null);
-    const templateLayout =
-      templateLayoutFromSnapshot(snapshot) ??
-      (report.template?.layout && typeof report.template.layout === 'object'
-        ? (report.template.layout as ReturnType<typeof templateLayoutFromSnapshot>)
-        : null);
-
     try {
       const clinic = await getClinicSettings();
-      const pdf = await renderReportPdf({
-        clinic: {
-          name: clinic.name,
-          phone: clinic.phone,
-          email: clinic.email,
-          address: clinic.address,
-          timezone: clinic.timezone,
-        },
-        report: {
-          id: report.id,
-          status: report.status,
-          versionNumber: report.versionNumber,
-          finalizedAt: report.finalizedAt,
-          lastAmendedAt: report.lastAmendedAt,
-          content: report.currentContent as Record<string, unknown>,
-          templateName: snapshot?.name ?? report.template?.name ?? null,
-          templateVersion: report.templateVersion ?? snapshot?.version ?? null,
-          templateFields,
-          templateLayout,
-        },
-        patient: {
-          patientNumber: report.visit.patient.patientNumber,
-          firstName: report.visit.patient.firstName,
-          lastName: report.visit.patient.lastName,
-          dateOfBirth: report.visit.patient.dateOfBirth,
-          gender: report.visit.patient.gender,
-        },
-        examination: {
-          visitDate: report.visit.visitDate,
-          doctor: `${report.visit.doctor.firstName} ${report.visit.doctor.lastName}`,
-          examinationType: report.visit.examinationType,
-          chiefComplaint: report.visit.chiefComplaint,
-        },
-        measurements: report.visit.measurements,
-      });
+      const pdf = await renderReportPdf(await buildPdfInput(report));
 
       const safePatientNumber = report.visit.patient.patientNumber.replace(/[^A-Za-z0-9._-]/g, '-');
       const sent = await sendWhatsAppDocument({

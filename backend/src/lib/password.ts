@@ -52,8 +52,8 @@ export interface PasswordCheck {
 
 /** Deliberately pragmatic: length first, then variety. */
 export function checkPasswordStrength(password: string): PasswordCheck {
-  if (password.length < 10) {
-    return { ok: false, message: 'Password must be at least 10 characters long.' };
+  if (password.length < 8) {
+    return { ok: false, message: 'Password must be at least 8 characters long.' };
   }
   if (password.length > 200) {
     return { ok: false, message: 'Password is too long.' };

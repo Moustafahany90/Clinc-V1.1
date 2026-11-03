@@ -1,8 +1,16 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-alpine AS base
+FROM node:22-bookworm-slim AS base
 WORKDIR /app
-RUN apk add --no-cache openssl
+# Playwright does not support Alpine/musl. Chromium and the fonts used by the
+# Arabic letterhead need a glibc base image.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+       openssl \
+       ca-certificates \
+       fonts-urw-base35 \
+       fonts-noto-core \
+  && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
 # Build stage: also used by the `migrate` compose service (has prisma CLI).
@@ -21,6 +29,7 @@ RUN npm run build
 # ---------------------------------------------------------------------------
 FROM base AS runtime
 ENV NODE_ENV=production
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 COPY package.json package-lock.json ./
 # @prisma/client declares the Prisma CLI as an optional peer, so npm installs the
 # CLI (and its engine/fetch tooling) even with --omit=dev. The running API only
@@ -35,6 +44,8 @@ RUN npm ci --omit=dev \
            node_modules/@prisma/fetch-engine \
            node_modules/@prisma/get-platform \
            node_modules/deepmerge-ts \
+ && npx playwright install --with-deps chromium \
+ && chmod -R 755 /ms-playwright \
  && npm cache clean --force
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/dist ./dist

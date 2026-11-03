@@ -122,7 +122,7 @@ export function SetupPage({ onComplete }: { onComplete: () => void }) {
         admin.firstName.trim() &&
         admin.lastName.trim() &&
         /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(admin.email) &&
-        admin.password.length >= 10 &&
+        admin.password.length >= 8 &&
         score >= 2 &&
         admin.password === admin.confirm
       );
@@ -140,8 +140,8 @@ export function SetupPage({ onComplete }: { onComplete: () => void }) {
         setError('The two passwords do not match.');
         return;
       }
-      if (admin.password.length < 10) {
-        setError('Password must be at least 10 characters long.');
+      if (admin.password.length < 8) {
+        setError('Password must be at least 8 characters long.');
         return;
       }
       const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^A-Za-z0-9]/].filter((r) =>
@@ -434,7 +434,7 @@ export function SetupPage({ onComplete }: { onComplete: () => void }) {
                     ))}
                   </div>
                   <p className="mt-1.5 text-[11px] text-ink-500">
-                    At least 10 characters, using three of: lowercase, uppercase, numbers, symbols.
+                    At least 8 characters, using three of: lowercase, uppercase, numbers, symbols.
                   </p>
                 </div>
               </div>

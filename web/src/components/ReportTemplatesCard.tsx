@@ -91,6 +91,7 @@ function draftFromTemplate(template: ReportTemplate): Draft {
       footerNote: template.layout?.footerNote ?? '',
       showMeasurements: template.layout?.showMeasurements ?? true,
       showSignature: template.layout?.showSignature ?? true,
+      printLayout: template.layout?.printLayout,
     },
     isDefault: template.isDefault,
   };
@@ -205,12 +206,16 @@ export function ReportTemplatesCard() {
           required: field.required ?? false,
           visible: field.visible !== false,
           ...(field.placeholder?.trim() ? { placeholder: field.placeholder.trim() } : {}),
+          ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
         })),
         layout: {
           headerNote: draft.layout.headerNote?.trim() ?? '',
           footerNote: draft.layout.footerNote?.trim() ?? '',
           showMeasurements: draft.layout.showMeasurements ?? true,
           showSignature: draft.layout.showSignature ?? true,
+          ...(draft.layout.printLayout && draft.layout.printLayout !== 'default'
+            ? { printLayout: draft.layout.printLayout }
+            : {}),
         },
         isDefault: draft.isDefault,
       };
@@ -467,6 +472,7 @@ export function ReportTemplatesCard() {
                         <option value="number">Number</option>
                         <option value="date">Date</option>
                         <option value="select">Choice</option>
+                        <option value="list">List</option>
                       </Select>
                     </Field>
                     <div className="flex flex-wrap items-end gap-1 pb-0.5">
@@ -515,6 +521,22 @@ export function ReportTemplatesCard() {
             </div>
 
             <div className="grid gap-3 rounded-xl border border-line p-3 sm:grid-cols-2">
+              <Field label="Print layout" hint="Fixed designs are built into the app.">
+                <Select
+                  value={draft?.layout.printLayout ?? 'default'}
+                  onChange={(event) =>
+                    updateDraft({
+                      layout: {
+                        ...(draft?.layout ?? {}),
+                        printLayout: event.target.value as 'default' | 'gyn4d',
+                      },
+                    })
+                  }
+                >
+                  <option value="default">Standard</option>
+                  <option value="gyn4d">4D Gynecology (Dr. Monira)</option>
+                </Select>
+              </Field>
               <Field label="Print header note" hint="Shown under the clinic letterhead.">
                 <Textarea
                   value={draft?.layout.headerNote ?? ''}

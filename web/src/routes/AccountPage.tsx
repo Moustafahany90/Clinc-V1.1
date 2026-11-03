@@ -38,8 +38,8 @@ export function AccountPage() {
       setError('The new passwords do not match.');
       return;
     }
-    if (newPassword.length < 10) {
-      setError('Use at least 10 characters for the new password.');
+    if (newPassword.length < 8) {
+      setError('Use at least 8 characters for the new password.');
       return;
     }
     setBusy(true);
@@ -111,7 +111,7 @@ export function AccountPage() {
             <Field
               label="New password"
               htmlFor="new-password"
-              hint="At least 10 characters. Avoid names, dates and common words."
+              hint="At least 8 characters. Avoid names, dates and common words."
               required
             >
               <Input

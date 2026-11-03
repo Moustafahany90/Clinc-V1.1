@@ -151,7 +151,11 @@ export function ReportEditorPage() {
   function buildContent(): Record<string, unknown> {
     const merged: Record<string, unknown> = { ...(report?.currentContent ?? {}) };
     for (const field of fields) {
-      merged[field.key] = content[field.key] ?? '';
+      const raw = content[field.key] ?? '';
+      merged[field.key] =
+        field.type === 'list'
+          ? raw.split('\n').map((item) => item.trim()).filter(Boolean)
+          : raw;
     }
     return merged;
   }
@@ -176,6 +180,9 @@ export function ReportEditorPage() {
     setBusy(true);
     setError(null);
     try {
+      // Finalizing only changes the report status; persist the edits currently
+      // in the editor first so they are part of the signed version.
+      await api.patch(`/reports/${report.id}`, { content: buildContent() });
       await api.post(`/reports/${report.id}/finalize`);
       toast.success('Report finalized', 'The visit has been completed and the report is now read-only.');
       setFinalizeOpen(false);
@@ -293,8 +300,20 @@ export function ReportEditorPage() {
       const template = templates.find((item) => item.id === createTemplateId);
       const usedFields = template && template.fields.length > 0 ? template.fields : DEFAULT_FIELDS;
       const visit = (visitsState.data?.visits ?? []).find((item) => item.id === createVisitId);
-      const initial: ContentState = {};
-      for (const field of usedFields) initial[field.key] = '';
+      const initial: Record<string, unknown> = {};
+      for (const field of usedFields) {
+        const d = field.defaultValue;
+        initial[field.key] =
+          field.type === 'list'
+            ? Array.isArray(d)
+              ? d
+              : d
+                ? [d]
+                : []
+            : Array.isArray(d)
+              ? d.join('\n')
+              : (d ?? '');
+      }
       if ('indication' in initial && visit?.chiefComplaint) {
         initial.indication = visit.chiefComplaint;
       }
@@ -579,9 +598,9 @@ export function ReportEditorPage() {
                     label={field.label}
                     htmlFor={fieldId}
                     required={field.required}
-                    hint={field.placeholder ? undefined : undefined}
+                    hint={field.type === 'list' ? 'One item per line.' : undefined}
                   >
-                    {field.type === 'textarea' ? (
+                    {field.type === 'textarea' || field.type === 'list' ? (
                       <Textarea
                         id={fieldId}
                         value={value}

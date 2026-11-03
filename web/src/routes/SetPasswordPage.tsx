@@ -46,8 +46,8 @@ export function SetPasswordPage() {
       setError('The two passwords do not match.');
       return;
     }
-    if (password.length < 10) {
-      setError('Password must be at least 10 characters long.');
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters long.');
       return;
     }
     setBusy(true);
@@ -138,7 +138,7 @@ export function SetPasswordPage() {
                 />
               </Field>
               <p className="text-[11px] text-ink-500">
-                At least 10 characters using three of: lowercase, uppercase, numbers, symbols.
+                At least 8 characters using three of: lowercase, uppercase, numbers, symbols.
               </p>
               <Button type="submit" className="w-full" size="lg" loading={busy}>
                 Save password
