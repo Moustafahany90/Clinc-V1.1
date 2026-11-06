@@ -56,6 +56,20 @@ async function api(
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
 
+async function rawGet(
+  path: string,
+  token: string,
+): Promise<{ status: number; contentType: string | null; text: string }> {
+  const response = await fetch(`${baseUrl}${path}`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  return {
+    status: response.status,
+    contentType: response.headers.get('content-type'),
+    text: await response.text(),
+  };
+}
+
 function templatePayload(overrides: Record<string, unknown> = {}) {
   return {
     name: 'Obstetric ultrasound',
@@ -381,5 +395,227 @@ test('report templates are configurable and pinned per report', async (t) => {
       body: { visitId, templateId, content: { findings: 'Should fail' } },
     });
     assert.equal(created.status, 400, JSON.stringify(created.body));
+  });
+});
+
+test('gyn4d templates can be duplicated, edited and keep pinned print settings', async (t) => {
+  const initialLayout = {
+    printLayout: 'gyn4d',
+    showMeasurements: false,
+    showSignature: false,
+    gyn4d: {
+      pageTitle: 'Custom 4D scan',
+      scanTitle: 'Pelvic 4D scan',
+      headerText: 'Dr. Custom\nCustom fetal medicine unit',
+      doctorName: 'Dr. Custom',
+      doctorRole: 'Consultant, fetal medicine',
+      doctorUniversity: 'Custom University',
+      phone: 'Tel : 100',
+      address: '1 Custom Street',
+    },
+  };
+  const fields = [
+    { key: 'uterusDesc', label: 'Uterus', type: 'textarea' },
+    { key: 'conclusion', label: 'Conclusion', type: 'list' },
+  ];
+  let templateId = '';
+  let reportId = '';
+
+  await t.test('an administrator can create a gyn4d template with custom print details', async () => {
+    const created = await api('/reports/templates', {
+      method: 'POST',
+      token: adminToken,
+      body: {
+        name: 'Custom 4D clinic template',
+        description: 'Second 4D design for another doctor',
+        fields,
+        layout: initialLayout,
+      },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    templateId = created.body.template.id;
+    assert.equal(created.body.template.layout.gyn4d.doctorName, 'Dr. Custom');
+    assert.equal(created.body.template.layout.gyn4d.address, '1 Custom Street');
+  });
+
+  await t.test('the printout uses the template 4D details', async () => {
+    const visitId = await createVisit();
+    const created = await api('/reports', {
+      method: 'POST',
+      token: doctorToken,
+      body: {
+        visitId,
+        templateId,
+        content: { uterusDesc: 'Uterus is AVF', conclusion: ['Normal scan'] },
+      },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    reportId = created.body.report.id;
+
+    const print = await rawGet(`/reports/${reportId}/print-html`, doctorToken);
+    assert.equal(print.status, 200, print.text);
+    assert.match(print.contentType ?? '', /text\/html/);
+    assert.ok(print.text.includes('<title>Custom 4D scan</title>'));
+    assert.ok(print.text.includes('<div class="name">Dr. Custom</div>'));
+    assert.ok(print.text.includes('<div class="tel">Tel : 100</div>'));
+    assert.ok(print.text.includes('Custom fetal medicine unit'));
+  });
+
+  await t.test('editing 4D details leaves an existing report pinned to its version', async () => {
+    const updatedLayout = {
+      ...initialLayout,
+      gyn4d: {
+        ...initialLayout.gyn4d,
+        doctorName: 'Dr. Updated',
+        doctorRole: 'Updated consultant',
+        phone: 'Tel : 200',
+      },
+    };
+    const updated = await api(`/reports/templates/${templateId}`, {
+      method: 'PATCH',
+      token: adminToken,
+      body: { layout: updatedLayout },
+    });
+    assert.equal(updated.status, 200, JSON.stringify(updated.body));
+
+    const oldPrint = await rawGet(`/reports/${reportId}/print-html`, doctorToken);
+    assert.equal(oldPrint.status, 200, oldPrint.text);
+    assert.ok(oldPrint.text.includes('Dr. Custom'), 'pinned report keeps its old doctor');
+    assert.ok(!oldPrint.text.includes('Dr. Updated'));
+
+    const visitId = await createVisit();
+    const newReport = await api('/reports', {
+      method: 'POST',
+      token: doctorToken,
+      body: {
+        visitId,
+        templateId,
+        content: { uterusDesc: 'Uterus is AVF', conclusion: ['Normal scan'] },
+      },
+    });
+    assert.equal(newReport.status, 201, JSON.stringify(newReport.body));
+    const newPrint = await rawGet(`/reports/${newReport.body.report.id}/print-html`, doctorToken);
+    assert.equal(newPrint.status, 200, newPrint.text);
+    assert.ok(newPrint.text.includes('Dr. Updated'));
+  });
+
+  await t.test('renaming section fields updates new printouts but not pinned reports', async () => {
+    const updated = await api(`/reports/templates/${templateId}`, {
+      method: 'PATCH',
+      token: adminToken,
+      body: {
+        fields: [
+          { key: 'uterusDesc', label: 'Womb', type: 'textarea' },
+          { key: 'conclusion', label: 'Impression', type: 'list' },
+        ],
+      },
+    });
+    assert.equal(updated.status, 200, JSON.stringify(updated.body));
+
+    const oldPrint = await rawGet(`/reports/${reportId}/print-html`, doctorToken);
+    assert.equal(oldPrint.status, 200, oldPrint.text);
+    assert.ok(oldPrint.text.includes('<h2>Uterus:</h2>'));
+    assert.ok(!oldPrint.text.includes('<h2>Womb:</h2>'));
+
+    const visitId = await createVisit();
+    const created = await api('/reports', {
+      method: 'POST',
+      token: doctorToken,
+      body: {
+        visitId,
+        templateId,
+        content: { uterusDesc: 'Uterus is AVF', conclusion: ['Normal scan'] },
+      },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+
+    const newPrint = await rawGet(`/reports/${created.body.report.id}/print-html`, doctorToken);
+    assert.equal(newPrint.status, 200, newPrint.text);
+    assert.ok(newPrint.text.includes('<h2>Womb:</h2>'));
+    assert.ok(newPrint.text.includes('>Impression :</h2>'));
+  });
+
+  await t.test('duplicating copies fields and 4D details into a separately editable template', async () => {
+    const list = await api('/reports/templates', { token: adminToken });
+    const source = list.body.templates.find((template: any) => template.id === templateId);
+    assert.ok(source, 'source template must exist');
+
+    const duplicate = await api('/reports/templates', {
+      method: 'POST',
+      token: adminToken,
+      body: {
+        name: 'Custom 4D clinic template (copy)',
+        description: source.description,
+        serviceId: source.serviceId,
+        fields: source.fields,
+        layout: source.layout,
+        isDefault: false,
+      },
+    });
+    assert.equal(duplicate.status, 201, JSON.stringify(duplicate.body));
+    const duplicateId = duplicate.body.template.id;
+    assert.notEqual(duplicateId, templateId);
+    assert.deepEqual(
+      duplicate.body.template.fields.map((field: any) => field.key),
+      fields.map((field) => field.key),
+    );
+    assert.equal(duplicate.body.template.layout.gyn4d.doctorName, 'Dr. Updated');
+
+    const renamed = await api(`/reports/templates/${duplicateId}`, {
+      method: 'PATCH',
+      token: adminToken,
+      body: {
+        name: 'Custom 4D clinic template (edited copy)',
+        layout: {
+          ...source.layout,
+          gyn4d: { ...source.layout.gyn4d, doctorName: 'Dr. Copy' },
+        },
+      },
+    });
+    assert.equal(renamed.status, 200, JSON.stringify(renamed.body));
+    assert.equal(renamed.body.template.name, 'Custom 4D clinic template (edited copy)');
+    assert.equal(renamed.body.template.layout.gyn4d.doctorName, 'Dr. Copy');
+
+    // The source template and its pinned report are untouched by the copy.
+    const sourcePrint = await rawGet(`/reports/${reportId}/print-html`, doctorToken);
+    assert.ok(sourcePrint.text.includes('Dr. Custom'));
+  });
+
+  await t.test('adding, deleting and reordering sections changes the 4D printout', async () => {
+    const updated = await api(`/reports/templates/${templateId}`, {
+      method: 'PATCH',
+      token: adminToken,
+      body: {
+        fields: [
+          { key: 'conclusion', label: 'Impression', type: 'list' },
+          { key: 'uterusDesc', label: 'Womb', type: 'textarea' },
+          { key: 'section_extra', label: 'Additional findings', type: 'textarea' },
+        ],
+      },
+    });
+    assert.equal(updated.status, 200, JSON.stringify(updated.body));
+
+    const visitId = await createVisit();
+    const created = await api('/reports', {
+      method: 'POST',
+      token: doctorToken,
+      body: {
+        visitId,
+        templateId,
+        content: {
+          uterusDesc: 'Uterus is AVF',
+          conclusion: ['Normal scan'],
+          section_extra: 'Extra finding text',
+        },
+      },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+
+    const print = await rawGet(`/reports/${created.body.report.id}/print-html`, doctorToken);
+    assert.equal(print.status, 200, print.text);
+    assert.ok(print.text.includes('<h2>Additional findings:</h2>'));
+    assert.ok(print.text.includes('Extra finding text'));
+    assert.ok(print.text.indexOf('Impression :') < print.text.indexOf('<h2>Womb:</h2>'));
+    assert.ok(!print.text.includes('Uterine measurements'));
   });
 });

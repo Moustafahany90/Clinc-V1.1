@@ -414,12 +414,26 @@ export interface ReportTemplateField {
   defaultValue?: string | string[];
 }
 
+export interface Gyn4dPrintSettings {
+  pageTitle?: string;
+  scanTitle?: string;
+  headerText?: string;
+  doctorName?: string;
+  doctorRole?: string;
+  doctorUniversity?: string;
+  phone?: string;
+  address?: string;
+  rightAdnexum?: string;
+  leftAdnexum?: string;
+}
+
 export interface ReportTemplateLayout {
   headerNote?: string;
   footerNote?: string;
   showMeasurements?: boolean;
   showSignature?: boolean;
   printLayout?: 'default' | 'gyn4d';
+  gyn4d?: Gyn4dPrintSettings;
 }
 
 export interface ReportTemplateSnapshot {

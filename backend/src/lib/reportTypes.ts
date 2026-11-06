@@ -8,12 +8,31 @@ export interface ReportTemplateField {
   defaultValue?: string | string[];
 }
 
+/**
+ * Editable text for the fixed "gyn4d" print design. Every value is optional;
+ * missing or blank values fall back to the original Dr. Monira design so old
+ * templates and pinned report snapshots keep printing exactly as before.
+ */
+export interface Gyn4dPrintSettings {
+  pageTitle?: string;
+  scanTitle?: string;
+  headerText?: string;
+  doctorName?: string;
+  doctorRole?: string;
+  doctorUniversity?: string;
+  phone?: string;
+  address?: string;
+  rightAdnexum?: string;
+  leftAdnexum?: string;
+}
+
 export interface ReportTemplateLayout {
   headerNote?: string;
   footerNote?: string;
   showMeasurements?: boolean;
   showSignature?: boolean;
   printLayout?: 'default' | 'gyn4d';
+  gyn4d?: Gyn4dPrintSettings;
 }
 
 export interface TemplateSnapshot {

@@ -94,12 +94,26 @@ const templateFieldsSchema = z
     }
   });
 
+const gyn4dPrintSettingsSchema = z.object({
+  pageTitle: z.string().trim().max(160).optional(),
+  scanTitle: z.string().trim().max(160).optional(),
+  headerText: z.string().trim().max(500).optional(),
+  doctorName: z.string().trim().max(160).optional(),
+  doctorRole: z.string().trim().max(300).optional(),
+  doctorUniversity: z.string().trim().max(300).optional(),
+  phone: z.string().trim().max(200).optional(),
+  address: z.string().trim().max(300).optional(),
+  rightAdnexum: z.string().trim().max(160).optional(),
+  leftAdnexum: z.string().trim().max(160).optional(),
+});
+
 const templateLayoutSchema = z.object({
   headerNote: z.string().trim().max(500).optional(),
   footerNote: z.string().trim().max(1000).optional(),
   showMeasurements: z.boolean().optional(),
   showSignature: z.boolean().optional(),
   printLayout: z.enum(['default', 'gyn4d']).optional(),
+  gyn4d: gyn4dPrintSettingsSchema.optional(),
 });
 
 const templateSchema = z.object({

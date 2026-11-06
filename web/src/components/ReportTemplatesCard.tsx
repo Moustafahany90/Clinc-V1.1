@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  Copy,
   FileText,
   Plus,
   Save,
@@ -11,6 +12,7 @@ import {
 import { api, errorMessage } from '../lib/api';
 import { useAsyncData } from '../lib/hooks';
 import type {
+  Gyn4dPrintSettings,
   ReportTemplate,
   ReportTemplateField,
   ReportTemplateLayout,
@@ -53,6 +55,8 @@ interface Draft {
   fields: ReportTemplateField[];
   layout: ReportTemplateLayout;
   isDefault: boolean;
+  /** Set when the draft was opened from the Duplicate action. */
+  duplicatedFrom?: string;
 }
 
 const DEFAULT_FIELDS: ReportTemplateField[] = [
@@ -62,6 +66,26 @@ const DEFAULT_FIELDS: ReportTemplateField[] = [
   { key: 'impression', label: 'Impression', type: 'textarea' },
   { key: 'recommendations', label: 'Recommendations', type: 'textarea' },
 ];
+
+/**
+ * Effective 4D wording, mirrored from the backend renderer. New templates store
+ * these values explicitly so the printed design starts identical to the seeded
+ * 4D template (logo, header, footer and doctor block) and every part is editable.
+ * `scanTitle` stays blank on purpose: the renderer then keeps the styled
+ * "4D Gynecology SCAN" title.
+ */
+const GYN4D_DEFAULT_SETTINGS: Gyn4dPrintSettings = {
+  pageTitle: '4D Gynecology Scan',
+  headerText:
+    'د/ منيره علي علي\nاستشاري الموجات الصوتية و طب الجنين\nبوحده طب الجنين- جامعه عين شمس',
+  doctorName: 'Dr. Monira Ali Ali',
+  doctorRole: 'Ultrasound and fetal medicine consultant, Fetal medicine unit,',
+  doctorUniversity: 'Ain shams University.',
+  phone: 'Tel : 01113735454 - 01555579454',
+  address: '10 ش سامي عبد العال – ارض الجولف – مصر الجديدة',
+  rightAdnexum: 'Right adnexum',
+  leftAdnexum: 'Left adnexum',
+};
 
 function emptyDraft(): Draft {
   return {
@@ -92,8 +116,37 @@ function draftFromTemplate(template: ReportTemplate): Draft {
       showMeasurements: template.layout?.showMeasurements ?? true,
       showSignature: template.layout?.showSignature ?? true,
       printLayout: template.layout?.printLayout,
+      ...(template.layout?.gyn4d ? { gyn4d: { ...template.layout.gyn4d } } : {}),
     },
     isDefault: template.isDefault,
+  };
+}
+
+/**
+ * A new template starts from the 4D design so it prints with the same logo,
+ * header and footer. The operator can still switch the print layout to Standard.
+ */
+function newTemplateDraft(templates: ReportTemplate[]): Draft {
+  const source = templates.find(
+    (template) =>
+      template.layout?.printLayout === 'gyn4d' &&
+      template.fields.some((field) => field.key === 'uterusDesc'),
+  );
+  if (!source) return emptyDraft();
+
+  const copy = draftFromTemplate(source);
+  return {
+    ...copy,
+    id: undefined,
+    name: '',
+    description: '',
+    serviceId: '',
+    isDefault: false,
+    layout: {
+      ...copy.layout,
+      printLayout: 'gyn4d',
+      gyn4d: { ...GYN4D_DEFAULT_SETTINGS, ...(source.layout?.gyn4d ?? {}) },
+    },
   };
 }
 
@@ -148,6 +201,71 @@ export function ReportTemplatesCard() {
     });
   }
 
+  function updateGyn4dSettings(patch: Partial<Gyn4dPrintSettings>) {
+    setDraft((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        layout: {
+          ...current.layout,
+          gyn4d: { ...(current.layout.gyn4d ?? {}), ...patch },
+        },
+      };
+    });
+  }
+
+  /**
+   * Switching a template to the 4D layout starts it from the classic 4D
+   * structure and wording. From there the operator can freely add, delete or
+   * reorder sections; the structure-aware renderer follows the template.
+   */
+  function changePrintLayout(printLayout: 'default' | 'gyn4d') {
+    setDraft((current) => {
+      if (!current) return current;
+      let fields = current.fields;
+      let gyn4d = current.layout.gyn4d;
+      if (printLayout === 'gyn4d') {
+        const source = templates.find(
+          (template) =>
+            template.layout?.printLayout === 'gyn4d' &&
+            template.fields.some((field) => field.key === 'uterusDesc'),
+        );
+        if (source) {
+          if (!fields.some((field) => field.key === 'uterusDesc')) {
+            fields = source.fields.map((field) => ({ ...field }));
+          }
+          if (!gyn4d) {
+            gyn4d = { ...GYN4D_DEFAULT_SETTINGS, ...(source.layout?.gyn4d ?? {}) };
+          }
+        }
+      }
+      return {
+        ...current,
+        fields,
+        layout: { ...current.layout, printLayout, ...(gyn4d ? { gyn4d } : {}) },
+      };
+    });
+  }
+
+  function duplicateTemplate(template: ReportTemplate) {
+    const existingNames = new Set(templates.map((item) => item.name.trim().toLowerCase()));
+    const base = `${template.name} (copy)`;
+    let name = base.slice(0, 160);
+    for (let index = 2; existingNames.has(name.toLowerCase()); index += 1) {
+      name = `${template.name} (copy ${index})`.slice(0, 160);
+      if (index > 100) break;
+    }
+    const copy = draftFromTemplate(template);
+    setError(null);
+    setDraft({
+      ...copy,
+      id: undefined,
+      name,
+      isDefault: false,
+      duplicatedFrom: template.name,
+    });
+  }
+
   function moveField(index: number, delta: number) {
     setDraft((current) => {
       if (!current) return current;
@@ -195,6 +313,11 @@ export function ReportTemplatesCard() {
     setError(null);
     setBusy(true);
     try {
+      const gyn4dSettings = Object.fromEntries(
+        Object.entries(draft.layout.gyn4d ?? {}).filter(
+          ([, value]) => typeof value === 'string' && value.trim(),
+        ),
+      ) as Gyn4dPrintSettings;
       const payload = {
         name: draft.name.trim(),
         description: draft.description.trim(),
@@ -215,6 +338,9 @@ export function ReportTemplatesCard() {
           showSignature: draft.layout.showSignature ?? true,
           ...(draft.layout.printLayout && draft.layout.printLayout !== 'default'
             ? { printLayout: draft.layout.printLayout }
+            : {}),
+          ...(draft.layout.printLayout === 'gyn4d' && Object.keys(gyn4dSettings).length > 0
+            ? { gyn4d: gyn4dSettings }
             : {}),
         },
         isDefault: draft.isDefault,
@@ -284,10 +410,10 @@ export function ReportTemplatesCard() {
     <Card>
       <CardHeader
         title="Report templates"
-        description="Section order, headings, print notes and the default template. Reports keep the version they were created with."
+        description="Section order, headings, defaults, 4D print details and the default template. Reports keep the version they were created with."
         icon={FileText}
         action={
-          <Button size="sm" onClick={() => setDraft(emptyDraft())}>
+          <Button size="sm" onClick={() => setDraft(newTemplateDraft(templates))}>
             <Plus className="h-3.5 w-3.5" aria-hidden />
             New template
           </Button>
@@ -327,6 +453,9 @@ export function ReportTemplatesCard() {
                             Default
                           </Badge>
                         )}
+                        {template.layout?.printLayout === 'gyn4d' && (
+                          <Badge tone="muted">4D</Badge>
+                        )}
                         {!template.isActive && <Badge tone="muted">Archived</Badge>}
                       </div>
                       {template.description && (
@@ -349,6 +478,15 @@ export function ReportTemplatesCard() {
                           }}
                         >
                           Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => duplicateTemplate(template)}
+                          title="Create an editable copy of this template"
+                        >
+                          <Copy className="h-3.5 w-3.5" aria-hidden />
+                          Duplicate
                         </Button>
                         {!template.isDefault && template.isActive && (
                           <Button
@@ -388,8 +526,20 @@ export function ReportTemplatesCard() {
       <Dialog open={draft !== null} onOpenChange={(open) => !open && setDraft(null)}>
         <DialogContent size="xl" className="max-w-3xl">
           <DialogHeader
-            title={draft?.id ? 'Edit report template' : 'New report template'}
-            description="Changes apply to new reports. Reports already created keep their pinned version."
+            title={
+              draft?.id
+                ? 'Edit report template'
+                : draft?.duplicatedFrom
+                  ? 'Duplicate report template'
+                  : 'New report template'
+            }
+            description={
+              draft?.duplicatedFrom
+                ? `A new copy of “${draft.duplicatedFrom}”. Change any detail before saving; existing reports keep their pinned version.`
+                : draft?.id
+                  ? 'Changes apply to new reports. Reports already created keep their pinned version.'
+                  : 'New templates start from the 4D design with the same logo, header and footer. Change any detail before saving; switch the print layout to Standard if you need a plain report.'
+            }
             icon={FileText}
           />
           <DialogBody className="space-y-5">
@@ -429,7 +579,9 @@ export function ReportTemplatesCard() {
                 <div>
                   <p className="text-[13px] font-semibold text-ink-900">Sections</p>
                   <p className="text-[11px] text-ink-500">
-                    Printed in this order. Empty sections are omitted from the printout.
+                    {draft?.layout.printLayout === 'gyn4d'
+                      ? 'Add, delete, rename or reorder sections. Known 4D keys keep the classic layout; extra sections print after their position in this list.'
+                      : 'Printed in this order. Empty sections are omitted from the printout.'}
                   </p>
                 </div>
                 <Button size="sm" variant="secondary" onClick={addField}>
@@ -439,98 +591,150 @@ export function ReportTemplatesCard() {
               </div>
 
               <div className="mt-3 space-y-2">
-                {(draft?.fields ?? []).map((field, index) => (
-                  <div
-                    key={`${field.key}-${index}`}
-                    className="grid gap-2 rounded-lg bg-surface-muted/45 p-2.5 sm:grid-cols-[1fr_10rem_8rem_auto]"
-                  >
-                    <Field label="Heading">
-                      <Input
-                        value={field.label}
-                        onChange={(event) => updateField(index, { label: event.target.value })}
-                        placeholder="e.g. Findings"
-                      />
-                    </Field>
-                    <Field label="Field key">
-                      <Input
-                        value={field.key}
-                        onChange={(event) => updateField(index, { key: event.target.value })}
-                        placeholder="findings"
-                      />
-                    </Field>
-                    <Field label="Type">
-                      <Select
-                        value={field.type}
-                        onChange={(event) =>
-                          updateField(index, {
-                            type: event.target.value as ReportTemplateField['type'],
-                          })
-                        }
-                      >
-                        <option value="textarea">Paragraph</option>
-                        <option value="text">Short text</option>
-                        <option value="number">Number</option>
-                        <option value="date">Date</option>
-                        <option value="select">Choice</option>
-                        <option value="list">List</option>
-                      </Select>
-                    </Field>
-                    <div className="flex flex-wrap items-end gap-1 pb-0.5">
-                      <Checkbox
-                        id={`required-${index}`}
-                        checked={field.required ?? false}
-                        onCheckedChange={(checked) => updateField(index, { required: checked })}
-                        label="Required"
-                      />
-                      <Checkbox
-                        id={`visible-${index}`}
-                        checked={field.visible !== false}
-                        onCheckedChange={(checked) => updateField(index, { visible: checked })}
-                        label="Print"
-                      />
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-label={`Move ${field.label || 'section'} up`}
-                        onClick={() => moveField(index, -1)}
-                        disabled={index === 0}
-                      >
-                        <ArrowUp className="h-3.5 w-3.5" aria-hidden />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-label={`Move ${field.label || 'section'} down`}
-                        onClick={() => moveField(index, 1)}
-                        disabled={index === (draft?.fields.length ?? 0) - 1}
-                      >
-                        <ArrowDown className="h-3.5 w-3.5" aria-hidden />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-label={`Remove ${field.label || 'section'}`}
-                        onClick={() => removeField(index)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                      </Button>
+                {(draft?.fields ?? []).map((field, index) => {
+                  const listDefault = Array.isArray(field.defaultValue)
+                    ? field.defaultValue.join('\n')
+                    : '';
+                  const defaultText =
+                    typeof field.defaultValue === 'string' ? field.defaultValue : listDefault;
+                  return (
+                    <div key={`${field.key}-${index}`} className="rounded-lg bg-surface-muted/45 p-2.5">
+                      <div className="grid gap-2 sm:grid-cols-[1fr_10rem_8rem_auto]">
+                        <Field label="Heading">
+                          <Input
+                            value={field.label}
+                            onChange={(event) => updateField(index, { label: event.target.value })}
+                            placeholder="e.g. Findings"
+                          />
+                        </Field>
+                        <Field label="Field key">
+                          <Input
+                            value={field.key}
+                            onChange={(event) => updateField(index, { key: event.target.value })}
+                            placeholder="findings"
+                          />
+                        </Field>
+                        <Field label="Type">
+                          <Select
+                            value={field.type}
+                            onChange={(event) =>
+                              updateField(index, {
+                                type: event.target.value as ReportTemplateField['type'],
+                              })
+                            }
+                          >
+                            <option value="textarea">Paragraph</option>
+                            <option value="text">Short text</option>
+                            <option value="number">Number</option>
+                            <option value="date">Date</option>
+                            <option value="select">Choice</option>
+                            <option value="list">List</option>
+                          </Select>
+                        </Field>
+                        <div className="flex flex-wrap items-end gap-1 pb-0.5">
+                          <Checkbox
+                            id={`required-${index}`}
+                            checked={field.required ?? false}
+                            onCheckedChange={(checked) => updateField(index, { required: checked })}
+                            label="Required"
+                          />
+                          <Checkbox
+                            id={`visible-${index}`}
+                            checked={field.visible !== false}
+                            onCheckedChange={(checked) => updateField(index, { visible: checked })}
+                            label="Print"
+                          />
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Move ${field.label || 'section'} up`}
+                            onClick={() => moveField(index, -1)}
+                            disabled={index === 0}
+                          >
+                            <ArrowUp className="h-3.5 w-3.5" aria-hidden />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Move ${field.label || 'section'} down`}
+                            onClick={() => moveField(index, 1)}
+                            disabled={index === (draft?.fields.length ?? 0) - 1}
+                          >
+                            <ArrowDown className="h-3.5 w-3.5" aria-hidden />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Remove ${field.label || 'section'}`}
+                            onClick={() => removeField(index)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        <Field
+                          label="Default value"
+                          hint={
+                            field.type === 'list'
+                              ? 'One list item per line.'
+                              : 'Prefilled when a new report starts.'
+                          }
+                        >
+                          {field.type === 'list' ? (
+                            <Textarea
+                              rows={2}
+                              value={listDefault}
+                              onChange={(event) => {
+                                const items = event.target.value
+                                  .split(/\r?\n/)
+                                  .map((item) => item.trim())
+                                  .filter(Boolean);
+                                updateField(index, {
+                                  defaultValue: items.length > 0 ? items : undefined,
+                                });
+                              }}
+                              placeholder={'One item per line\ne.g. AVF uterus\nNormal both ovaries'}
+                            />
+                          ) : (
+                            <Input
+                              value={defaultText}
+                              onChange={(event) =>
+                                updateField(index, {
+                                  defaultValue: event.target.value || undefined,
+                                })
+                              }
+                              placeholder="Leave blank to start empty"
+                            />
+                          )}
+                        </Field>
+                        <Field label="Placeholder" hint="Hint shown inside the empty editor field.">
+                          <Input
+                            value={field.placeholder ?? ''}
+                            onChange={(event) =>
+                              updateField(index, {
+                                placeholder: event.target.value || undefined,
+                              })
+                            }
+                            placeholder="e.g. mm or cc"
+                          />
+                        </Field>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
             <div className="grid gap-3 rounded-xl border border-line p-3 sm:grid-cols-2">
-              <Field label="Print layout" hint="Fixed designs are built into the app.">
+              <Field
+                label="Print layout"
+                hint="4D keeps the logo, header and footer while sections stay editable."
+              >
                 <Select
                   value={draft?.layout.printLayout ?? 'default'}
                   onChange={(event) =>
-                    updateDraft({
-                      layout: {
-                        ...(draft?.layout ?? {}),
-                        printLayout: event.target.value as 'default' | 'gyn4d',
-                      },
-                    })
+                    changePrintLayout(event.target.value as 'default' | 'gyn4d')
                   }
                 >
                   <option value="default">Standard</option>
@@ -580,6 +784,120 @@ export function ReportTemplatesCard() {
                 label="Show the doctor signature block"
               />
             </div>
+
+            {draft?.layout.printLayout === 'gyn4d' && (
+              <div className="space-y-3 rounded-xl border border-line p-3">
+                <div>
+                  <p className="text-[13px] font-semibold text-ink-900">4D print details</p>
+                  <p className="text-[11px] text-ink-500">
+                    Leave a field blank to keep the original Dr. Monira wording. The logo and 4D
+                    page design stay the same; sections can be added, removed or reordered above.
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Page title" hint="Browser tab and PDF document title.">
+                    <Input
+                      value={draft.layout.gyn4d?.pageTitle ?? ''}
+                      onChange={(event) =>
+                        updateGyn4dSettings({ pageTitle: event.target.value })
+                      }
+                      placeholder="4D Gynecology Scan"
+                    />
+                  </Field>
+                  <Field label="Printed scan title" hint="Centered title above the sections.">
+                    <Input
+                      value={draft.layout.gyn4d?.scanTitle ?? ''}
+                      onChange={(event) =>
+                        updateGyn4dSettings({ scanTitle: event.target.value })
+                      }
+                      placeholder="4D Gynecology SCAN"
+                    />
+                  </Field>
+                </div>
+                <Field
+                  label="Header text"
+                  hint="One line per row. The first line is highlighted; the logo stays on the right."
+                >
+                  <Textarea
+                    value={draft.layout.gyn4d?.headerText ?? ''}
+                    onChange={(event) =>
+                      updateGyn4dSettings({ headerText: event.target.value })
+                    }
+                    rows={3}
+                    placeholder={'د/ منيره علي علي\nاستشاري الموجات الصوتية و طب الجنين\nبوحده طب الجنين- جامعه عين شمس'}
+                  />
+                </Field>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Doctor name" hint="Signature block.">
+                    <Input
+                      value={draft.layout.gyn4d?.doctorName ?? ''}
+                      onChange={(event) =>
+                        updateGyn4dSettings({ doctorName: event.target.value })
+                      }
+                      placeholder="Dr. Monira Ali Ali"
+                    />
+                  </Field>
+                  <Field label="Doctor role / title" hint="Signature block.">
+                    <Input
+                      value={draft.layout.gyn4d?.doctorRole ?? ''}
+                      onChange={(event) =>
+                        updateGyn4dSettings({ doctorRole: event.target.value })
+                      }
+                      placeholder="Ultrasound and fetal medicine consultant, Fetal medicine unit,"
+                    />
+                  </Field>
+                  <Field label="University / hospital">
+                    <Input
+                      value={draft.layout.gyn4d?.doctorUniversity ?? ''}
+                      onChange={(event) =>
+                        updateGyn4dSettings({ doctorUniversity: event.target.value })
+                      }
+                      placeholder="Ain shams University."
+                    />
+                  </Field>
+                  <Field label="Phone">
+                    <Input
+                      value={draft.layout.gyn4d?.phone ?? ''}
+                      onChange={(event) => updateGyn4dSettings({ phone: event.target.value })}
+                      placeholder="Tel : 01113735454 - 01555579454"
+                    />
+                  </Field>
+                </div>
+                <Field label="Address">
+                  <Input
+                    value={draft.layout.gyn4d?.address ?? ''}
+                    onChange={(event) => updateGyn4dSettings({ address: event.target.value })}
+                    placeholder="10 ش سامي عبد العال – ارض الجولف – مصر الجديدة"
+                  />
+                </Field>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field
+                    label="Right adnexum heading"
+                    hint="Section heading above the right ovary table."
+                  >
+                    <Input
+                      value={draft.layout.gyn4d?.rightAdnexum ?? ''}
+                      onChange={(event) =>
+                        updateGyn4dSettings({ rightAdnexum: event.target.value })
+                      }
+                      placeholder="Right adnexum"
+                    />
+                  </Field>
+                  <Field
+                    label="Left adnexum heading"
+                    hint="Section heading above the left ovary table."
+                  >
+                    <Input
+                      value={draft.layout.gyn4d?.leftAdnexum ?? ''}
+                      onChange={(event) =>
+                        updateGyn4dSettings({ leftAdnexum: event.target.value })
+                      }
+                      placeholder="Left adnexum"
+                    />
+                  </Field>
+                </div>
+              </div>
+            )}
 
             <Checkbox
               id="template-default"
