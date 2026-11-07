@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
   Copy,
   FileText,
   Plus,
@@ -32,6 +33,10 @@ import {
   DialogContent,
   DialogFooter,
   DialogHeader,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
   EmptyState,
   Field,
   Input,
@@ -54,9 +59,41 @@ interface Draft {
   serviceId: string;
   fields: ReportTemplateField[];
   layout: ReportTemplateLayout;
+  /** Pretty-printed `layout.definition` for block templates only. */
+  definitionText: string;
   isDefault: boolean;
   /** Set when the draft was opened from the Duplicate action. */
   duplicatedFrom?: string;
+}
+
+const STARTER_DEFINITION = {
+  schemaVersion: 1,
+  baseSize: 11,
+  blocks: [
+    { type: 'title', text: 'Ultrasound Report' },
+    {
+      type: 'section',
+      title: 'Findings',
+      children: [
+        {
+          type: 'text',
+          template: '{{findings}}',
+          fields: { findings: { placeholder: 'Findings' } },
+        },
+      ],
+    },
+    { type: 'signature' },
+  ],
+};
+
+function parseDefinitionText(text: string): { definition?: unknown; error?: string } {
+  try {
+    return { definition: JSON.parse(text) };
+  } catch (err) {
+    return {
+      error: `Definition JSON is not valid: ${err instanceof Error ? err.message : 'unknown error'}`,
+    };
+  }
 }
 
 const DEFAULT_FIELDS: ReportTemplateField[] = [
@@ -99,6 +136,7 @@ function emptyDraft(): Draft {
       showMeasurements: true,
       showSignature: true,
     },
+    definitionText: '',
     isDefault: false,
   };
 }
@@ -117,7 +155,11 @@ function draftFromTemplate(template: ReportTemplate): Draft {
       showSignature: template.layout?.showSignature ?? true,
       printLayout: template.layout?.printLayout,
       ...(template.layout?.gyn4d ? { gyn4d: { ...template.layout.gyn4d } } : {}),
+      ...(template.layout?.definition ? { definition: template.layout.definition } : {}),
     },
+    definitionText: template.layout?.definition
+      ? JSON.stringify(template.layout.definition, null, 2)
+      : '',
     isDefault: template.isDefault,
   };
 }
@@ -150,8 +192,31 @@ function newTemplateDraft(templates: ReportTemplate[]): Draft {
   };
 }
 
+/**
+ * A block template starts from a minimal valid definition. The operator edits
+ * the JSON in the dialog and can validate or preview it before saving.
+ */
+function newBlockTemplateDraft(): Draft {
+  return {
+    name: '',
+    description: '',
+    serviceId: '',
+    fields: [],
+    layout: {
+      printLayout: 'blocks',
+      showMeasurements: false,
+      showSignature: false,
+    },
+    definitionText: JSON.stringify(STARTER_DEFINITION, null, 2),
+    isDefault: false,
+  };
+}
+
 function validateDraft(draft: Draft): string | null {
   if (!draft.name.trim()) return 'Give the template a name.';
+  if (draft.layout.printLayout === 'blocks') {
+    return parseDefinitionText(draft.definitionText).error ?? null;
+  }
   if (draft.fields.length === 0) return 'Add at least one section.';
   const keys = new Set<string>();
   for (const [index, field] of draft.fields.entries()) {
@@ -181,11 +246,115 @@ export function ReportTemplatesCard() {
   const [error, setError] = useState<string | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<ReportTemplate | null>(null);
   const [defaultTarget, setDefaultTarget] = useState<ReportTemplate | null>(null);
+  const [blockCheck, setBlockCheck] = useState<{ ok: boolean; message: string } | null>(null);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const importInput = useRef<HTMLInputElement | null>(null);
 
   const templates = templatesState.data?.templates ?? [];
   const services = servicesState.data?.services ?? [];
   const serviceName = (id: string | null) =>
     id ? (services.find((service) => service.id === id)?.name ?? 'Service') : 'Any service';
+
+  function openDraft(next: Draft) {
+    setError(null);
+    setBlockCheck(null);
+    setPreviewHtml(null);
+    setDraft(next);
+  }
+
+  function updateDefinitionText(value: string) {
+    setBlockCheck(null);
+    setPreviewHtml(null);
+    updateDraft({ definitionText: value });
+  }
+
+  async function validateBlockDefinition(text: string) {
+    const parsed = parseDefinitionText(text);
+    if (parsed.error) {
+      setBlockCheck({ ok: false, message: parsed.error });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api.post<{ ok: boolean; errors: string[]; fieldCount: number }>(
+        '/reports/templates/validate',
+        { definition: parsed.definition },
+      );
+      setBlockCheck({
+        ok: res.data.ok,
+        message: res.data.ok
+          ? `OK, ${res.data.fieldCount} field${res.data.fieldCount === 1 ? '' : 's'}`
+          : res.data.errors.join('\n'),
+      });
+    } catch (err) {
+      setBlockCheck({ ok: false, message: errorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function previewBlockDefinition(text: string) {
+    const parsed = parseDefinitionText(text);
+    if (parsed.error) {
+      setBlockCheck({ ok: false, message: parsed.error });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api.post<{ html: string }>('/reports/templates/preview', {
+        definition: parsed.definition,
+      });
+      setPreviewHtml(res.data.html);
+    } catch (err) {
+      setBlockCheck({ ok: false, message: errorMessage(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function importDefinitionJson(file: File | null) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === 'string' ? reader.result : '';
+      const parsed = parseDefinitionText(text);
+      if (parsed.error) {
+        setBlockCheck({ ok: false, message: parsed.error });
+        return;
+      }
+      const value = parsed.definition;
+      const definition =
+        value && typeof value === 'object' && 'definition' in value
+          ? (value as { definition: unknown }).definition
+          : value;
+      updateDefinitionText(JSON.stringify(definition, null, 2));
+    };
+    reader.readAsText(file);
+    if (importInput.current) importInput.current.value = '';
+  }
+
+  function exportDefinitionJson() {
+    if (!draft) return;
+    const parsed = parseDefinitionText(draft.definitionText);
+    if (parsed.error) {
+      setError(parsed.error);
+      return;
+    }
+    const payload = {
+      name: draft.name.trim() || 'report-template',
+      description: draft.description.trim(),
+      definition: parsed.definition,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${(draft.name.trim() || 'report-template')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
 
   function updateDraft(patch: Partial<Draft>) {
     setDraft((current) => (current ? { ...current, ...patch } : current));
@@ -256,8 +425,7 @@ export function ReportTemplatesCard() {
       if (index > 100) break;
     }
     const copy = draftFromTemplate(template);
-    setError(null);
-    setDraft({
+    openDraft({
       ...copy,
       id: undefined,
       name,
@@ -311,40 +479,61 @@ export function ReportTemplatesCard() {
       return;
     }
     setError(null);
+    const blockTemplate = draft.layout.printLayout === 'blocks';
+    let definition: unknown;
+    if (blockTemplate) {
+      const parsed = parseDefinitionText(draft.definitionText);
+      if (parsed.error) {
+        setError(parsed.error);
+        return;
+      }
+      definition = parsed.definition;
+    }
     setBusy(true);
     try {
-      const gyn4dSettings = Object.fromEntries(
-        Object.entries(draft.layout.gyn4d ?? {}).filter(
-          ([, value]) => typeof value === 'string' && value.trim(),
-        ),
-      ) as Gyn4dPrintSettings;
-      const payload = {
-        name: draft.name.trim(),
-        description: draft.description.trim(),
-        serviceId: draft.serviceId || null,
-        fields: draft.fields.map((field) => ({
-          key: field.key.trim(),
-          label: field.label.trim(),
-          type: field.type,
-          required: field.required ?? false,
-          visible: field.visible !== false,
-          ...(field.placeholder?.trim() ? { placeholder: field.placeholder.trim() } : {}),
-          ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
-        })),
-        layout: {
-          headerNote: draft.layout.headerNote?.trim() ?? '',
-          footerNote: draft.layout.footerNote?.trim() ?? '',
-          showMeasurements: draft.layout.showMeasurements ?? true,
-          showSignature: draft.layout.showSignature ?? true,
-          ...(draft.layout.printLayout && draft.layout.printLayout !== 'default'
-            ? { printLayout: draft.layout.printLayout }
-            : {}),
-          ...(draft.layout.printLayout === 'gyn4d' && Object.keys(gyn4dSettings).length > 0
-            ? { gyn4d: gyn4dSettings }
-            : {}),
-        },
-        isDefault: draft.isDefault,
-      };
+      let payload: Record<string, unknown>;
+      if (blockTemplate) {
+        payload = {
+          name: draft.name.trim(),
+          description: draft.description.trim(),
+          serviceId: draft.serviceId || null,
+          isDefault: draft.isDefault,
+          layout: { printLayout: 'blocks', definition },
+        };
+      } else {
+        const gyn4dSettings = Object.fromEntries(
+          Object.entries(draft.layout.gyn4d ?? {}).filter(
+            ([, value]) => typeof value === 'string' && value.trim(),
+          ),
+        ) as Gyn4dPrintSettings;
+        payload = {
+          name: draft.name.trim(),
+          description: draft.description.trim(),
+          serviceId: draft.serviceId || null,
+          fields: draft.fields.map((field) => ({
+            key: field.key.trim(),
+            label: field.label.trim(),
+            type: field.type,
+            required: field.required ?? false,
+            visible: field.visible !== false,
+            ...(field.placeholder?.trim() ? { placeholder: field.placeholder.trim() } : {}),
+            ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
+          })),
+          layout: {
+            headerNote: draft.layout.headerNote?.trim() ?? '',
+            footerNote: draft.layout.footerNote?.trim() ?? '',
+            showMeasurements: draft.layout.showMeasurements ?? true,
+            showSignature: draft.layout.showSignature ?? true,
+            ...(draft.layout.printLayout && draft.layout.printLayout !== 'default'
+              ? { printLayout: draft.layout.printLayout }
+              : {}),
+            ...(draft.layout.printLayout === 'gyn4d' && Object.keys(gyn4dSettings).length > 0
+              ? { gyn4d: gyn4dSettings }
+              : {}),
+          },
+          isDefault: draft.isDefault,
+        };
+      }
       if (draft.id) {
         await api.patch(`/reports/templates/${draft.id}`, payload);
         toast.success('Report template updated');
@@ -353,6 +542,8 @@ export function ReportTemplatesCard() {
         toast.success('Report template created');
       }
       setDraft(null);
+      setBlockCheck(null);
+      setPreviewHtml(null);
       templatesState.reload();
     } catch (err) {
       setError(errorMessage(err));
@@ -413,10 +604,25 @@ export function ReportTemplatesCard() {
         description="Section order, headings, defaults, 4D print details and the default template. Reports keep the version they were created with."
         icon={FileText}
         action={
-          <Button size="sm" onClick={() => setDraft(newTemplateDraft(templates))}>
-            <Plus className="h-3.5 w-3.5" aria-hidden />
-            New template
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm">
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+                New template
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-56">
+              <DropdownMenuItem onSelect={() => openDraft(newTemplateDraft(templates))}>
+                <FileText className="h-4 w-4" aria-hidden />
+                Standard template
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => openDraft(newBlockTemplateDraft())}>
+                <FileText className="h-4 w-4" aria-hidden />
+                Block template
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         }
       />
 
@@ -456,6 +662,9 @@ export function ReportTemplatesCard() {
                         {template.layout?.printLayout === 'gyn4d' && (
                           <Badge tone="muted">4D</Badge>
                         )}
+                        {template.layout?.printLayout === 'blocks' && (
+                          <Badge tone="info">Blocks</Badge>
+                        )}
                         {!template.isActive && <Badge tone="muted">Archived</Badge>}
                       </div>
                       {template.description && (
@@ -472,10 +681,7 @@ export function ReportTemplatesCard() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => {
-                            setError(null);
-                            setDraft(draftFromTemplate(template));
-                          }}
+                          onClick={() => openDraft(draftFromTemplate(template))}
                         >
                           Edit
                         </Button>
@@ -531,14 +737,18 @@ export function ReportTemplatesCard() {
                 ? 'Edit report template'
                 : draft?.duplicatedFrom
                   ? 'Duplicate report template'
-                  : 'New report template'
+                  : draft?.layout.printLayout === 'blocks'
+                    ? 'New block template'
+                    : 'New report template'
             }
             description={
               draft?.duplicatedFrom
                 ? `A new copy of “${draft.duplicatedFrom}”. Change any detail before saving; existing reports keep their pinned version.`
                 : draft?.id
                   ? 'Changes apply to new reports. Reports already created keep their pinned version.'
-                  : 'New templates start from the 4D design with the same logo, header and footer. Change any detail before saving; switch the print layout to Standard if you need a plain report.'
+                  : draft?.layout.printLayout === 'blocks'
+                    ? 'Define the report as JSON blocks. Validate or preview it before saving; existing reports keep their pinned version.'
+                    : 'New templates start from the 4D design with the same logo, header and footer. Change any detail before saving; switch the print layout to Standard if you need a plain report.'
             }
             icon={FileText}
           />
@@ -574,6 +784,7 @@ export function ReportTemplatesCard() {
               />
             </Field>
 
+            {draft?.layout.printLayout !== 'blocks' && (
             <div className="rounded-xl border border-line p-3">
               <div className="flex items-center justify-between gap-2">
                 <div>
@@ -725,7 +936,9 @@ export function ReportTemplatesCard() {
                 })}
               </div>
             </div>
+            )}
 
+            {draft?.layout.printLayout !== 'blocks' && (
             <div className="grid gap-3 rounded-xl border border-line p-3 sm:grid-cols-2">
               <Field
                 label="Print layout"
@@ -784,6 +997,75 @@ export function ReportTemplatesCard() {
                 label="Show the doctor signature block"
               />
             </div>
+            )}
+
+            {draft?.layout.printLayout === 'blocks' && (
+              <div className="space-y-3 rounded-xl border border-line p-3">
+                <div>
+                  <p className="text-[13px] font-semibold text-ink-900">Block definition</p>
+                  <p className="text-[11px] text-ink-500">
+                    The JSON list of blocks rendered by the report engine. Validate or preview it
+                    before saving; the server derives the fields from the definition.
+                  </p>
+                </div>
+                <Textarea
+                  value={draft.definitionText}
+                  onChange={(event) => updateDefinitionText(event.target.value)}
+                  rows={16}
+                  spellCheck={false}
+                  className="font-mono text-[11px] leading-relaxed"
+                  aria-label="Template definition JSON"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void validateBlockDefinition(draft.definitionText)}
+                    disabled={busy}
+                  >
+                    Validate
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void previewBlockDefinition(draft.definitionText)}
+                    disabled={busy}
+                  >
+                    Preview
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => importInput.current?.click()}
+                  >
+                    Import JSON
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={exportDefinitionJson}>
+                    Export JSON
+                  </Button>
+                  <input
+                    ref={importInput}
+                    type="file"
+                    className="hidden"
+                    accept="application/json,.json"
+                    onChange={(event) => importDefinitionJson(event.target.files?.[0] ?? null)}
+                  />
+                </div>
+                {blockCheck && (
+                  <Alert tone={blockCheck.ok ? 'success' : 'danger'}>
+                    <span className="whitespace-pre-wrap">{blockCheck.message}</span>
+                  </Alert>
+                )}
+                {previewHtml && (
+                  <iframe
+                    title="Template preview"
+                    srcDoc={previewHtml}
+                    sandbox="allow-same-origin allow-modals"
+                    className="mx-auto block h-[520px] w-[8.5in] max-w-full border border-line bg-white"
+                  />
+                )}
+              </div>
+            )}
 
             {draft?.layout.printLayout === 'gyn4d' && (
               <div className="space-y-3 rounded-xl border border-line p-3">

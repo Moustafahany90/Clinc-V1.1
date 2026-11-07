@@ -1,0 +1,495 @@
+{
+  "name": "First Trimester Screening 11-13 Weeks",
+  "description": "First trimester screening scan",
+  "definition": {
+    "schemaVersion": 1,
+    "baseSize": 11,
+    "blocks": [
+      {
+        "type": "infoTable",
+        "rows": [
+          {
+            "label": "Name",
+            "source": "patient.name"
+          },
+          {
+            "label": "Exam Date",
+            "source": "visit.date"
+          },
+          {
+            "label": "Date of Birth",
+            "source": "patient.dob"
+          },
+          {
+            "label": "LMP",
+            "key": "lmp",
+            "placeholder": "dd/mm/yyyy"
+          },
+          {
+            "label": "EDD by date",
+            "key": "eddByDate",
+            "placeholder": "dd/mm/yyyy"
+          },
+          {
+            "label": "EDD by U/S",
+            "key": "eddByUs",
+            "placeholder": "dd/mm/yyyy"
+          },
+          {
+            "label": "Scan quality",
+            "key": "scanQuality",
+            "default": "Good quality scan"
+          },
+          {
+            "label": "Serial Visit No",
+            "key": "serialVisit",
+            "default": "1"
+          },
+          {
+            "label": "Referred By prof Dr/",
+            "key": "referredBy",
+            "boxed": true
+          }
+        ]
+      },
+      {
+        "type": "title",
+        "text": "First trimester screening"
+      },
+      {
+        "type": "text",
+        "template": "{{pregnancy}}",
+        "fields": {
+          "pregnancy": {
+            "default": "Single Intrauterine pregnancy."
+          }
+        }
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "template": "{{fetalHealth}}",
+            "fields": {
+              "fetalHealth": {
+                "default": "Fetus is healthy with regular, rhythmic cardiac beats"
+              }
+            }
+          },
+          {
+            "template": "FHR = {{fhr}}",
+            "fields": {
+              "fhr": {
+                "placeholder": "bpm"
+              }
+            }
+          },
+          {
+            "template": "{{moving}}",
+            "fields": {
+              "moving": {
+                "default": "Moving at scan time."
+              }
+            }
+          }
+        ],
+        "style": "bullet"
+      },
+      {
+        "type": "section",
+        "title": "Fetal Biometry :",
+        "children": [
+          {
+            "type": "gridTable",
+            "widths": [
+              3,
+              1
+            ],
+            "rows": [
+              {
+                "cells": [
+                  {
+                    "template": "• Crown Rump Length (CRL)"
+                  },
+                  {
+                    "template": "{{crl}}",
+                    "fields": {
+                      "crl": {
+                        "placeholder": "mm"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "• Nuchal thickness (NT)"
+                  },
+                  {
+                    "template": "{{nt}}",
+                    "fields": {
+                      "nt": {
+                        "placeholder": "mm"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "• Nasal Bone length (NB)"
+                  },
+                  {
+                    "template": "{{nb}}",
+                    "fields": {
+                      "nb": {
+                        "default": "Present"
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "border": "all"
+          },
+          {
+            "type": "text",
+            "template": "Expected gestational age (EGA) : {{ega}}",
+            "fields": {
+              "ega": {
+                "placeholder": "wks + d"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Placenta :",
+        "children": [
+          {
+            "type": "list",
+            "items": [
+              {
+                "template": "{{placentaLocation}}",
+                "fields": {
+                  "placentaLocation": {
+                    "default": "Placenta is Posterior with low dipping reaching the IO"
+                  }
+                }
+              },
+              {
+                "template": "{{placentaGrade}}",
+                "fields": {
+                  "placentaGrade": {
+                    "default": "Grade 1 maturity."
+                  }
+                }
+              },
+              {
+                "template": "{{retroPlacental}}",
+                "fields": {
+                  "retroPlacental": {
+                    "default": "Retro placental space is free, with no separations or focal lesions."
+                  }
+                }
+              }
+            ],
+            "style": "bullet"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Amniotic Fluid:",
+        "children": [
+          {
+            "type": "text",
+            "template": "{{amnioticFluid}}",
+            "fields": {
+              "amnioticFluid": {
+                "default": "Amniotic fluid is Clear in aspect, and average in amount."
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Umbilical cord:",
+        "children": [
+          {
+            "type": "list",
+            "items": [
+              {
+                "template": "{{cordHernia}}",
+                "fields": {
+                  "cordHernia": {
+                    "default": "No physiological umbilical hernia."
+                  }
+                }
+              },
+              {
+                "template": "Cord Insertion : {{cordInsertion}}",
+                "fields": {
+                  "cordInsertion": {
+                    "default": "Normal ( Central)."
+                  }
+                }
+              }
+            ],
+            "style": "bullet"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Fetal Gender:",
+        "children": [
+          {
+            "type": "text",
+            "template": "{{fetalGender}}",
+            "fields": {
+              "fetalGender": {
+                "options": [
+                  "Male",
+                  "Female"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Sonographic appearance of fetal anatomy :",
+        "children": [
+          {
+            "type": "checklistTable",
+            "key": "anatomy",
+            "columns": [
+              {
+                "key": "n",
+                "label": "N",
+                "default": "N"
+              },
+              {
+                "key": "a",
+                "label": "A"
+              },
+              {
+                "key": "nv",
+                "label": "NV"
+              }
+            ],
+            "rows": [
+              {
+                "key": "head",
+                "label": "Head and brain",
+                "depth": 0,
+                "values": true
+              },
+              {
+                "key": "head_shape",
+                "label": "Head shape",
+                "depth": 1,
+                "values": false
+              },
+              {
+                "key": "head_falx",
+                "label": "Falx present",
+                "depth": 1,
+                "values": false
+              },
+              {
+                "key": "head_plexus",
+                "label": "Butterfly choroid plexus",
+                "depth": 1,
+                "values": false
+              },
+              {
+                "key": "heart",
+                "label": "Heart",
+                "depth": 0,
+                "values": true
+              },
+              {
+                "key": "heart_pos",
+                "label": "Intrathoracic position",
+                "depth": 1,
+                "values": false
+              },
+              {
+                "key": "heart_rhythm",
+                "label": "Regular- rhythmic",
+                "depth": 1,
+                "values": false
+              },
+              {
+                "key": "abdomen",
+                "label": "Abdomen",
+                "depth": 0,
+                "values": true
+              },
+              {
+                "key": "abd_stomach",
+                "label": "Stomach present",
+                "depth": 1,
+                "values": false
+              },
+              {
+                "key": "abd_wall",
+                "label": "Abdominal wall intact",
+                "depth": 1,
+                "values": false
+              },
+              {
+                "key": "abd_bladder",
+                "label": "Bladder normally distended",
+                "depth": 1,
+                "values": false
+              },
+              {
+                "key": "extremities",
+                "label": "Extremities",
+                "depth": 0,
+                "values": true
+              },
+              {
+                "key": "ext_upper",
+                "label": "Upper limbs",
+                "depth": 1,
+                "values": false
+              },
+              {
+                "key": "ext_lower",
+                "label": "Lower limbs",
+                "depth": 1,
+                "values": false
+              }
+            ],
+            "legend": [
+              "N= normal",
+              "A= abnormal",
+              "NA= not visualized"
+            ],
+            "subMarker": "dash",
+            "labelWidth": 52
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "2D Doppler Studies:",
+        "children": [
+          {
+            "type": "text",
+            "template": "Color Doppler examination of :"
+          },
+          {
+            "type": "list",
+            "items": [
+              {
+                "template": "{{ductusVenosus}}",
+                "fields": {
+                  "ductusVenosus": {
+                    "default": "Ductus venosus waveform: normal with normal A wave (Atrial contraction)."
+                  }
+                }
+              },
+              {
+                "template": "Uterine artery Doppler revealed mean PI = {{uterinePi}}",
+                "fields": {
+                  "uterinePi": {}
+                }
+              }
+            ],
+            "style": "number"
+          },
+          {
+            "type": "list",
+            "items": [
+              {
+                "template": "Cervical Canal Biometry:",
+                "children": [
+                  {
+                    "template": "Internal OS inner to inner diameter : {{internalOs}}",
+                    "fields": {
+                      "internalOs": {
+                        "placeholder": "mm"
+                      }
+                    }
+                  },
+                  {
+                    "template": "Cervical canal length : {{cervicalLength}}",
+                    "fields": {
+                      "cervicalLength": {
+                        "placeholder": "mm"
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "style": "bullet",
+            "childStyle": "dash"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Other (maternal ) Findings :",
+        "children": [
+          {
+            "type": "list",
+            "items": [
+              {
+                "template": "Evidences of Swellings : {{swellings}}",
+                "fields": {
+                  "swellings": {}
+                }
+              },
+              {
+                "template": "Uterine wall Myomata : {{myomata}}",
+                "fields": {
+                  "myomata": {
+                    "default": "not detected"
+                  }
+                }
+              },
+              {
+                "template": "Ovarian cysts : {{ovarianCysts}}",
+                "fields": {
+                  "ovarianCysts": {
+                    "default": "not detected"
+                  }
+                }
+              }
+            ],
+            "style": "none"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Comment:",
+        "children": [
+          {
+            "type": "freeList",
+            "key": "comment",
+            "bold": true,
+            "default": [
+              "Single viable fetus weeks + day",
+              "First trimester anomaly scan revealed low risk for chromosomal abnormalities"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "signature"
+      }
+    ]
+  }
+}

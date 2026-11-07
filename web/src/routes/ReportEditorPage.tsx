@@ -21,6 +21,7 @@ import { useAsyncData } from '../lib/hooks';
 import { ageFromDob, dateOnlyInZone, formatDateOnly, formatDateTime, formatTime } from '../lib/format';
 import type { Report, ReportTemplate, ReportTemplateField, Visit } from '../lib/types';
 import { ConfirmDialog, ReasonDialog } from '../components/dialogs';
+import { ReportDocumentFrame, type ReportDocumentHandle } from '../components/ReportDocumentFrame';
 import { useToast } from '../components/toast';
 import {
   Alert,
@@ -69,6 +70,7 @@ export function ReportEditorPage() {
   const { timezone } = useClinic();
   const toast = useToast();
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const docRef = useRef<ReportDocumentHandle | null>(null);
 
   const [content, setContent] = useState<ContentState>({});
   const [amendMode, setAmendMode] = useState(false);
@@ -107,6 +109,8 @@ export function ReportEditorPage() {
   );
 
   const report = reportState.data?.report ?? null;
+  const usesBlocks =
+    (report?.templateSnapshot?.layout ?? report?.template?.layout)?.printLayout === 'blocks';
   const templateFields = report?.templateSnapshot?.fields ?? report?.template?.fields;
   const templateName = report?.templateSnapshot?.name ?? report?.template?.name ?? null;
   const fields = useMemo(() => {
@@ -149,6 +153,9 @@ export function ReportEditorPage() {
   const amendmentEditable = Boolean(report) && !draft && amendMode && canFinalize;
 
   function buildContent(): Record<string, unknown> {
+    if (usesBlocks) {
+      return docRef.current?.getContent(report?.currentContent ?? {}) ?? report?.currentContent ?? {};
+    }
     const merged: Record<string, unknown> = { ...(report?.currentContent ?? {}) };
     for (const field of fields) {
       const raw = content[field.key] ?? '';
@@ -298,6 +305,7 @@ export function ReportEditorPage() {
     try {
       const templates = templatesState.data?.templates ?? [];
       const template = templates.find((item) => item.id === createTemplateId);
+      const blockTemplate = template?.layout?.printLayout === 'blocks';
       const usedFields = template && template.fields.length > 0 ? template.fields : DEFAULT_FIELDS;
       const visit = (visitsState.data?.visits ?? []).find((item) => item.id === createVisitId);
       const initial: Record<string, unknown> = {};
@@ -320,7 +328,7 @@ export function ReportEditorPage() {
       const res = await api.post<{ report: Report }>('/reports', {
         visitId: createVisitId,
         templateId: createTemplateId || null,
-        content: initial,
+        content: blockTemplate ? {} : initial,
       });
       toast.success('Draft report created');
       navigate(`/reports/${res.data.report.id}`, { replace: true });
@@ -586,45 +594,56 @@ export function ReportEditorPage() {
               }
               icon={FileText}
             />
-            <div className="space-y-4 px-5 py-4">
-              {fields.map((field) => {
-                const fieldId = `report-field-${field.key}`;
-                const value = content[field.key] ?? '';
-                const onChange = (next: string) =>
-                  setContent((prev) => ({ ...prev, [field.key]: next }));
-                return (
-                  <Field
-                    key={field.key}
-                    label={field.label}
-                    htmlFor={fieldId}
-                    required={field.required}
-                    hint={field.type === 'list' ? 'One item per line.' : undefined}
-                  >
-                    {field.type === 'textarea' || field.type === 'list' ? (
-                      <Textarea
-                        id={fieldId}
-                        value={value}
-                        onChange={(event) => onChange(event.target.value)}
-                        placeholder={field.placeholder}
-                        readOnly={!editableNow}
-                        disabled={!editableNow}
-                        className={field.key === 'findings' ? 'min-h-[160px]' : 'min-h-[90px]'}
-                      />
-                    ) : (
-                      <Input
-                        id={fieldId}
-                        type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
-                        value={value}
-                        onChange={(event) => onChange(event.target.value)}
-                        placeholder={field.placeholder}
-                        readOnly={!editableNow}
-                        disabled={!editableNow}
-                      />
-                    )}
-                  </Field>
-                );
-              })}
-            </div>
+            {usesBlocks ? (
+              <div className="px-5 py-4">
+                <ReportDocumentFrame
+                  ref={docRef}
+                  reportId={report.id}
+                  docKey={`${report.id}:${report.versionNumber}`}
+                  mode={editableNow ? 'edit' : 'print'}
+                />
+              </div>
+            ) : (
+              <div className="space-y-4 px-5 py-4">
+                {fields.map((field) => {
+                  const fieldId = `report-field-${field.key}`;
+                  const value = content[field.key] ?? '';
+                  const onChange = (next: string) =>
+                    setContent((prev) => ({ ...prev, [field.key]: next }));
+                  return (
+                    <Field
+                      key={field.key}
+                      label={field.label}
+                      htmlFor={fieldId}
+                      required={field.required}
+                      hint={field.type === 'list' ? 'One item per line.' : undefined}
+                    >
+                      {field.type === 'textarea' || field.type === 'list' ? (
+                        <Textarea
+                          id={fieldId}
+                          value={value}
+                          onChange={(event) => onChange(event.target.value)}
+                          placeholder={field.placeholder}
+                          readOnly={!editableNow}
+                          disabled={!editableNow}
+                          className={field.key === 'findings' ? 'min-h-[160px]' : 'min-h-[90px]'}
+                        />
+                      ) : (
+                        <Input
+                          id={fieldId}
+                          type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
+                          value={value}
+                          onChange={(event) => onChange(event.target.value)}
+                          placeholder={field.placeholder}
+                          readOnly={!editableNow}
+                          disabled={!editableNow}
+                        />
+                      )}
+                    </Field>
+                  );
+                })}
+              </div>
+            )}
           </Card>
 
           {visit?.measurements && visit.measurements.length > 0 && (

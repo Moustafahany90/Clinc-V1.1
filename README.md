@@ -1,18 +1,54 @@
 # Ultrasound Clinic Management System
 
-A brand-new, independent Ultrasound Clinic Management System built with React 18 + TypeScript + Vite (frontend) and Node.js + Express + Prisma + PostgreSQL (backend).
+A full-stack, independent Ultrasound Clinic Management System. The frontend is a React 18 + TypeScript + Vite SPA; the backend is a Node.js + Express + Prisma + PostgreSQL API. It covers patient management, appointments, queue, visits, ultrasound reports (with measurements and images), payments, expenses, finance, and audit logging, with role-based access control for Admin, Receptionist, and Doctor.
+
+## Tech Stack
+
+**Frontend** (`web/`)
+- React 18, TypeScript 5, Vite 7, React Router v7
+- Tailwind CSS v4, Radix UI primitives, Lucide React, Axios
+
+**Backend** (`backend/`)
+- Node.js 20+, TypeScript 5, Express 4, tsx (dev) / tsc (build)
+- Prisma ORM v6, Zod validation, JWT access/refresh tokens
+- Multer uploads, Nodemailer SMTP, optional Microsoft Graph
+- PDF generation via pdfkit
+
+**Data & Infra**
+- PostgreSQL 16, Docker + Docker Compose (`db`, `backend`, `web`)
+- Nginx serves the SPA and reverse-proxies `/api`
+- Timezone: `Africa/Cairo`; UI content: English only
+
+## Features
+
+- **Patients & Visits** — demographics, visit history, clinical records scoped per doctor
+- **Appointments & Agenda** — scheduling, queue management
+- **Reports** — ultrasound report editor with measurements, images, versioning, print view
+- **Finance** — payments, expenses, finance summaries, bill printing
+- **Users & Roles** — Admin-managed accounts with permission-based access
+- **Audit** — audit log for sensitive actions
+- **Settings** — clinic settings, setup wizard on first run
+- **Security** — JWT auth with refresh rotation, rate limiting, helmet, CORS, env validation
 
 ## Quick Start (Docker)
 
-1. Copy environment file: cp .env.example .env and fill in secrets (generate with node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))")
-2. Start the stack: docker compose up -d
+1. Copy the environment file and fill in secrets:
+   ```bash
+   cp .env.example .env
+   # generate secrets with:
+   node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+   ```
+2. Start the stack:
+   ```bash
+   docker compose up -d
+   ```
 3. Open the app at http://localhost:8080
-4. Complete the setup wizard on first run
+4. Complete the setup wizard on first run.
 
-For a production deployment, use the TLS overlay and the hardened environment
-checklist in [docs/operations.md](docs/operations.md). The backend refuses to
-start with unsafe production settings (HTTP origin, insecure cookies, placeholder
-JWT secrets).
+For production, use the TLS overlay and the hardened checklist in
+[docs/operations.md](docs/operations.md). The backend refuses to start with
+unsafe production settings (HTTP origin, insecure cookies, placeholder JWT
+secrets).
 
 ## Development
 
@@ -22,8 +58,8 @@ JWT secrets).
 
 ### Both apps at once (recommended)
 ```bash
-npm run setup        # installs dependencies for the root tooling, backend and web
-npm run db:up        # starts PostgreSQL only (docker compose; host port = POSTGRES_PORT in .env)
+npm run setup        # installs dependencies for root, backend and web
+npm run db:up        # starts PostgreSQL only (host port = POSTGRES_PORT in .env)
 npm run dev          # runs backend (:4000) and web (:5173) together
 ```
 Other root scripts: `dev:web`, `dev:backend`, `build`, `typecheck`, `test`,
@@ -49,6 +85,7 @@ npm run dev
 ```
 
 ## Database migrations
+
 Use committed migrations; never `prisma db push` against a shared or production
 database.
 
@@ -61,6 +98,7 @@ CI applies all migrations to an empty Postgres database, checks for schema
 drift, runs the test suite, and builds both apps.
 
 ## Operations
+
 - Production TLS, monitoring, log rotation, backup schedule, and the restore
   drill are documented in [docs/operations.md](docs/operations.md).
 - Optional WhatsApp PDF delivery is manual, finalized-report-only and disabled
@@ -101,6 +139,7 @@ supplied. If any password was ever committed or shared, rotate it immediately:
 see [SECURITY.md](SECURITY.md).
 
 ## Documentation
+
 - [Test Accounts](docs/test-credentials.md)
 - [Security & Credential Rotation](SECURITY.md)
 - [Operations: TLS, Backups, Monitoring](docs/operations.md)
@@ -108,3 +147,21 @@ see [SECURITY.md](SECURITY.md).
 - [Decisions](docs/decisions.md)
 - [Finance Rules](docs/finance-rules.md)
 - [API Overview](docs/api.md)
+- [Feature Specification](UltrasoundClinicSystem_Feature_Specification.md)
+
+## Project Structure
+
+```
+Clinc-V1.1/
+├── backend/          # Express + Prisma API
+│   ├── prisma/       # schema & migrations
+│   ├── src/          # application code
+│   └── tests/        # node:test suite
+├── web/              # React + Vite SPA
+│   ├── src/          # components & routes
+│   └── public/
+├── docs/             # operations, API, finance, etc.
+├── scripts/          # backup / restore scripts
+├── docker-compose.yml
+└── .env.example
+```

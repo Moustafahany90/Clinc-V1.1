@@ -1,0 +1,645 @@
+{
+  "name": "4D Single Fetus Mid-trimester Scan",
+  "description": "Mid-trimester anomaly scan, single fetus",
+  "definition": {
+    "schemaVersion": 1,
+    "baseSize": 11,
+    "blocks": [
+      {
+        "type": "infoTable",
+        "rows": [
+          {
+            "label": "Name",
+            "source": "patient.name"
+          },
+          {
+            "label": "Exam Date",
+            "source": "visit.date"
+          },
+          {
+            "label": "Date of Birth",
+            "source": "patient.dob"
+          },
+          {
+            "label": "LMP",
+            "key": "lmp",
+            "placeholder": "dd/mm/yyyy"
+          },
+          {
+            "label": "EDD by date",
+            "key": "eddByDate",
+            "placeholder": "dd/mm/yyyy"
+          },
+          {
+            "label": "EDD by U/S",
+            "key": "eddByUs",
+            "placeholder": "dd/mm/yyyy"
+          },
+          {
+            "label": "Scan quality",
+            "key": "scanQuality",
+            "default": "Good quality scan"
+          },
+          {
+            "label": "Serial Visit No",
+            "key": "serialVisit",
+            "default": "1"
+          },
+          {
+            "label": "Referred By prof Dr/",
+            "key": "referredBy",
+            "boxed": true
+          }
+        ]
+      },
+      {
+        "type": "title",
+        "text": "4D&5D OBSTETRIC SCAN"
+      },
+      {
+        "type": "text",
+        "template": "{{pregnancy}}",
+        "fields": {
+          "pregnancy": {
+            "default": "Single intrauterine pregnancy."
+          }
+        }
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "template": "{{lie}}",
+            "fields": {
+              "lie": {
+                "default": "Longitudinal lie, cephalic presentation at scan time."
+              }
+            }
+          },
+          {
+            "template": "Fetal life is positive, with FHR = {{fhr}} (regular - rhythmic).",
+            "fields": {
+              "fhr": {
+                "placeholder": "bpm"
+              }
+            }
+          }
+        ],
+        "style": "bullet"
+      },
+      {
+        "type": "section",
+        "title": "Fetal Biometry :",
+        "children": [
+          {
+            "type": "gridTable",
+            "widths": [
+              3,
+              1
+            ],
+            "rows": [
+              {
+                "cells": [
+                  {
+                    "template": "Measurement",
+                    "align": "center"
+                  },
+                  {
+                    "template": "mm",
+                    "align": "center"
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "• Biparietal Diameter (BPD)"
+                  },
+                  {
+                    "template": "{{bpd}}",
+                    "fields": {
+                      "bpd": {
+                        "placeholder": "mm"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "• Head circumference (HC)"
+                  },
+                  {
+                    "template": "{{hc}}",
+                    "fields": {
+                      "hc": {
+                        "placeholder": "mm"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "• Femur length (FL)"
+                  },
+                  {
+                    "template": "{{fl}}",
+                    "fields": {
+                      "fl": {
+                        "placeholder": "mm"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "• Abdominal circumference (AC)"
+                  },
+                  {
+                    "template": "{{ac}}",
+                    "fields": {
+                      "ac": {
+                        "placeholder": "mm"
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "border": "all",
+            "headerRows": 1
+          },
+          {
+            "type": "text",
+            "template": "Estimated Gestational age (EGA) : {{ega}}",
+            "fields": {
+              "ega": {
+                "placeholder": "wks + d"
+              }
+            }
+          },
+          {
+            "type": "text",
+            "template": "Estimated fetal weight (EFW) : {{efw}} +10 %",
+            "fields": {
+              "efw": {
+                "placeholder": "Gm"
+              }
+            }
+          },
+          {
+            "type": "text",
+            "template": "Expected fetal weight running with {{centile}} centile for age",
+            "fields": {
+              "centile": {
+                "placeholder": "25th"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Placenta :",
+        "children": [
+          {
+            "type": "list",
+            "items": [
+              {
+                "label": "Placenta Location:",
+                "template": " {{placentaLocation}}",
+                "fields": {
+                  "placentaLocation": {
+                    "default": "is posterior with no low dipping its lower end away from IO"
+                  }
+                }
+              },
+              {
+                "label": "Placental maturity :-",
+                "template": " {{placentaMaturity}}",
+                "fields": {
+                  "placentaMaturity": {
+                    "default": "grade (I) maturity without peripheral calcifications."
+                  }
+                }
+              },
+              {
+                "template": "{{retroPlacental}}",
+                "fields": {
+                  "retroPlacental": {
+                    "default": "Retro placental space is free, with no separations or focal lesions."
+                  }
+                }
+              }
+            ],
+            "style": "bullet"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Amniotic Fluid:",
+        "children": [
+          {
+            "type": "list",
+            "items": [
+              {
+                "template": "{{liquor}}",
+                "fields": {
+                  "liquor": {
+                    "default": "Liquor is clear in aspect with normal volume"
+                  }
+                }
+              },
+              {
+                "template": "AFI = {{afi}} cm (normal range 10: 20 cm)",
+                "fields": {
+                  "afi": {}
+                }
+              },
+              {
+                "template": "DVP = {{dvp}} cm (normal range 2: 8 cm)",
+                "fields": {
+                  "dvp": {}
+                }
+              }
+            ],
+            "style": "circle"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Fetal Gender :",
+        "children": [
+          {
+            "type": "text",
+            "template": "{{fetalGender}}",
+            "fields": {
+              "fetalGender": {
+                "options": [
+                  "Male",
+                  "Female"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Sonographic appearance of fetal anatomy",
+        "children": [
+          {
+            "type": "checklistTable",
+            "key": "anatomy",
+            "columns": [
+              {
+                "key": "n",
+                "label": "N",
+                "default": "N"
+              },
+              {
+                "key": "ab",
+                "label": "Ab"
+              },
+              {
+                "key": "nv",
+                "label": "NV"
+              }
+            ],
+            "rows": [
+              {
+                "key": "head",
+                "label": "Head",
+                "depth": 0,
+                "values": false
+              },
+              {
+                "key": "head_shape",
+                "label": "Shape",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "head_csp",
+                "label": "Cavum septi pellucidi (CSP)",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "head_falx",
+                "label": "Midline falx",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "head_thalami",
+                "label": "Thalami",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "head_lv",
+                "label": "Lateral ventricle",
+                "depth": 1,
+                "values": true,
+                "defaults": {
+                  "n": ""
+                },
+                "placeholders": {
+                  "n": "mm"
+                }
+              },
+              {
+                "key": "head_cereb",
+                "label": "Cerebellum (TCD)",
+                "depth": 1,
+                "values": true,
+                "defaults": {
+                  "n": ""
+                },
+                "placeholders": {
+                  "n": "mm"
+                }
+              },
+              {
+                "key": "head_cm",
+                "label": "Cisterna magna",
+                "depth": 1,
+                "values": true,
+                "defaults": {
+                  "n": ""
+                },
+                "placeholders": {
+                  "n": "mm"
+                }
+              },
+              {
+                "key": "face",
+                "label": "Face",
+                "depth": 0,
+                "values": false
+              },
+              {
+                "key": "face_lip",
+                "label": "Upper lip",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "face_profile",
+                "label": "Median profile",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "face_orbits",
+                "label": "Orbits",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "face_nose",
+                "label": "Nose",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "face_nostrils",
+                "label": "Nostrils",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "neck",
+                "label": "Neck",
+                "depth": 0,
+                "values": true
+              },
+              {
+                "key": "thorax",
+                "label": "Thorax",
+                "depth": 0,
+                "values": false
+              },
+              {
+                "key": "thorax_shape",
+                "label": "Shape",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "thorax_masses",
+                "label": "No masses",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "heart",
+                "label": "Heart",
+                "depth": 0,
+                "values": false
+              },
+              {
+                "key": "heart_activity",
+                "label": "Heart activity",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "heart_size",
+                "label": "Size",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "heart_axis",
+                "label": "Cardiac axis",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "heart_4ch",
+                "label": "4CH view",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "heart_lvot",
+                "label": "Left ventricular outflow tract",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "heart_rvot",
+                "label": "Right ventricular outflow tract",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "heart_3v",
+                "label": "Three vessels view",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "abdomen",
+                "label": "Abdomen",
+                "depth": 0,
+                "values": false
+              },
+              {
+                "key": "abd_stomach",
+                "label": "Stomach",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "abd_kidneys",
+                "label": "Kidneys",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "abd_bladder",
+                "label": "Urinary bladder",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "abd_cord",
+                "label": "Abdominal cord insertion",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "abd_vessels",
+                "label": "Cord vessels",
+                "depth": 1,
+                "values": true
+              },
+              {
+                "key": "spine",
+                "label": "Spine",
+                "depth": 0,
+                "values": true
+              },
+              {
+                "key": "limbs",
+                "label": "Limbs",
+                "depth": 0,
+                "values": true,
+                "defaults": {
+                  "n": "normal movement"
+                }
+              },
+              {
+                "key": "others",
+                "label": "OTHERS",
+                "depth": 0,
+                "values": true,
+                "defaults": {
+                  "n": ""
+                }
+              }
+            ],
+            "labelWidth": 50
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Color Doppler Studies:",
+        "children": [
+          {
+            "type": "text",
+            "template": "Color Doppler examination revealed :"
+          },
+          {
+            "type": "list",
+            "items": [
+              {
+                "template": "Umbilical artery Doppler revealed:-",
+                "children": [
+                  {
+                    "template": "R.I. = {{uaRi}} (Normal for gestational age)",
+                    "fields": {
+                      "uaRi": {}
+                    }
+                  },
+                  {
+                    "template": "P.I. = {{uaPi}} (Normal for gestational age)",
+                    "fields": {
+                      "uaPi": {}
+                    }
+                  }
+                ]
+              }
+            ],
+            "style": "bullet",
+            "childStyle": "circle"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Biophysical profile:",
+        "children": [
+          {
+            "type": "list",
+            "items": [
+              {
+                "template": "Breathing Mov. : {{bppBreathing}}.  Trunk movements: {{bppTrunk}}.",
+                "fields": {
+                  "bppBreathing": {
+                    "default": "N"
+                  },
+                  "bppTrunk": {
+                    "default": "N"
+                  }
+                }
+              },
+              {
+                "template": "Limb Movement (Tone) : {{bppTone}}.  Amniotic fluid: {{bppFluid}}.",
+                "fields": {
+                  "bppTone": {
+                    "default": "N"
+                  },
+                  "bppFluid": {
+                    "default": "N"
+                  }
+                }
+              }
+            ],
+            "style": "bullet"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Comment:",
+        "children": [
+          {
+            "type": "freeList",
+            "key": "comment",
+            "bold": true,
+            "default": [
+              "Single viable intrauterine pregnancy",
+              "Fetal structure as described above",
+              "Normal Doppler indices"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "signature"
+      }
+    ]
+  }
+}

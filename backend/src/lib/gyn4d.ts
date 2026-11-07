@@ -1,6 +1,6 @@
-import type { Browser } from 'playwright';
 import type { ReportPdfInput } from './reportPdf.js';
 import type { ReportTemplateField } from './reportTypes.js';
+import { renderHtmlToPdf } from './htmlPdf.js';
 import { GYN4D_LOGO } from './gyn4dLogo.js';
 
 /**
@@ -183,7 +183,7 @@ body{font-family:var(--font);color:#000;line-height:1.25;background:#fff}
 .hdr{position:fixed;top:.2in;left:1in;right:.5in;display:flex;align-items:center;justify-content:space-between}
 .hdr .txt{flex:1;text-align:center;direction:rtl;font-size:12pt;line-height:1.25}
 .hdr .dr{color:var(--purple);font-weight:700;font-size:16pt}
-.hdr img{width:2.22in;height:auto;display:block}
+.hdr img{width:2.22in;height:1.185in;display:block}
 .ftr{position:fixed;bottom:.4in;left:1in;right:.5in;display:flex;justify-content:space-between;align-items:flex-end;gap:.3in;color:var(--pink);font-weight:700;font-size:12pt}
 .ftr .addr{direction:rtl;text-align:right}
 .ftr .tel{direction:ltr;white-space:nowrap}
@@ -659,43 +659,6 @@ ${body}
 </body></html>`;
 }
 
-let browserPromise: Promise<Browser> | null = null;
-
-async function getBrowser(): Promise<Browser> {
-  if (!browserPromise) {
-    browserPromise = import('playwright').then(({ chromium }) =>
-      chromium.launch({ args: ['--no-sandbox'] }),
-    );
-    browserPromise.catch(() => {
-      browserPromise = null;
-    });
-  }
-  const browser = await browserPromise;
-  if (!browser.isConnected()) {
-    browserPromise = null;
-    return getBrowser();
-  }
-  return browser;
-}
-
 export async function renderGyn4dPdf(input: ReportPdfInput): Promise<Buffer> {
-  const browser = await getBrowser();
-  // JavaScript off and every non-data request blocked: the HTML is static and
-  // must never reach out to the network while rendering clinical data.
-  const context = await browser.newContext({ javaScriptEnabled: false });
-  try {
-    const page = await context.newPage();
-    await page.route('**/*', (route) =>
-      route.request().url().startsWith('data:') ? route.continue() : route.abort(),
-    );
-    await page.setContent(renderGyn4dHtml(input), { waitUntil: 'load' });
-    const pdf = await page.pdf({
-      format: PAGE_SIZE,
-      printBackground: true,
-      preferCSSPageSize: true,
-    });
-    return Buffer.from(pdf);
-  } finally {
-    await context.close();
-  }
+  return renderHtmlToPdf(renderGyn4dHtml(input), PAGE_SIZE);
 }

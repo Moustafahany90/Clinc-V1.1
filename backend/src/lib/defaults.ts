@@ -1,5 +1,13 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Prisma } from '@prisma/client';
 import { prisma } from './prisma.js';
+import { templateDefinitionSchema, validateDefinition } from './report-blocks/index.js';
+
+const REPORT_TEMPLATES_DIR = fileURLToPath(
+  new URL('../../prisma/report-templates/', import.meta.url),
+);
 
 type Gyn4dField = {
   key: string;
@@ -177,4 +185,42 @@ export async function ensureDefaults(
       isDefault: false,
     },
   });
+
+  // Block-based report templates. Idempotent upsert by unique name; every file
+  // is schema-checked and cross-validated before anything is written.
+  for (const file of readdirSync(REPORT_TEMPLATES_DIR)
+    .filter((name) => name.endsWith('.json'))
+    .sort()) {
+    const raw = JSON.parse(readFileSync(join(REPORT_TEMPLATES_DIR, file), 'utf8')) as {
+      name: string;
+      description?: string;
+      definition: unknown;
+    };
+    const parsed = templateDefinitionSchema.parse(raw.definition);
+    const check = validateDefinition(parsed);
+    if (!check.ok) throw new Error(`${file}: ${check.errors.join('; ')}`);
+    const layout = {
+      printLayout: 'blocks',
+      definition: parsed,
+      showMeasurements: false,
+      showSignature: false,
+    };
+    await tx.reportTemplate.upsert({
+      where: { name: raw.name },
+      update: {
+        description: raw.description ?? null,
+        fields: check.fields as unknown as Prisma.InputJsonValue,
+        layout: layout as unknown as Prisma.InputJsonValue,
+        isActive: true,
+      },
+      create: {
+        name: raw.name,
+        description: raw.description ?? null,
+        fields: check.fields as unknown as Prisma.InputJsonValue,
+        layout: layout as unknown as Prisma.InputJsonValue,
+        isActive: true,
+        isDefault: false,
+      },
+    });
+  }
 }

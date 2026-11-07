@@ -1,3 +1,5 @@
+import type { TemplateDefinition } from './reportBlocks.types';
+
 export type Role = 'ADMIN' | 'RECEPTIONIST' | 'DOCTOR';
 
 export type Permission =
@@ -407,11 +409,12 @@ export interface Report {
 export interface ReportTemplateField {
   key: string;
   label: string;
-  type: 'text' | 'textarea' | 'number' | 'date' | 'select' | 'list';
+  type: 'text' | 'textarea' | 'number' | 'date' | 'select' | 'list' | 'checklist';
   required?: boolean;
   visible?: boolean;
   placeholder?: string;
-  defaultValue?: string | string[];
+  options?: string[];
+  defaultValue?: string | string[] | Record<string, string>;
 }
 
 export interface Gyn4dPrintSettings {
@@ -432,8 +435,9 @@ export interface ReportTemplateLayout {
   footerNote?: string;
   showMeasurements?: boolean;
   showSignature?: boolean;
-  printLayout?: 'default' | 'gyn4d';
+  printLayout?: 'default' | 'gyn4d' | 'blocks';
   gyn4d?: Gyn4dPrintSettings;
+  definition?: TemplateDefinition;
 }
 
 export interface ReportTemplateSnapshot {

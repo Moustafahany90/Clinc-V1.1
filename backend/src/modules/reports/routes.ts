@@ -25,6 +25,14 @@ import { getClinicSettings } from '../../lib/clinic.js';
 import { renderReportPdf, type ReportPdfInput } from '../../lib/reportPdf.js';
 import { renderGyn4dHtml } from '../../lib/gyn4d.js';
 import {
+  buildInitialContent,
+  renderReportHtml,
+  templateDefinitionSchema,
+  validateDefinition,
+} from '../../lib/report-blocks/index.js';
+import type { TemplateDefinition } from '../../lib/report-blocks/blocks.types.js';
+import { systemValues } from '../../lib/report-blocks/pdf.js';
+import {
   templateFieldsFromSnapshot,
   templateLayoutFromSnapshot,
   type TemplateSnapshot,
@@ -48,6 +56,9 @@ const contentSchema = z.record(
     z.boolean(),
     z.null(),
     z.array(z.string().max(2_000)).max(50),
+    z
+      .record(z.string().max(120), z.string().max(2_000))
+      .refine((record) => Object.keys(record).length <= 400, 'Too many entries'),
   ]),
 );
 
@@ -67,12 +78,19 @@ const templateFieldSchema = z.object({
       'Field keys must start with a letter and use only letters, numbers and underscores.',
     ),
   label: z.string().trim().min(1).max(160),
-  type: z.enum(['text', 'textarea', 'number', 'date', 'select', 'list']).default('text'),
+  type: z
+    .enum(['text', 'textarea', 'number', 'date', 'select', 'list', 'checklist'])
+    .default('text'),
   required: z.boolean().default(false),
   visible: z.boolean().optional(),
   placeholder: z.string().trim().max(200).optional(),
+  options: z.array(z.string().trim().min(1).max(80)).min(1).max(30).optional(),
   defaultValue: z
-    .union([z.string().max(2_000), z.array(z.string().max(2_000)).max(50)])
+    .union([
+      z.string().max(2_000),
+      z.array(z.string().max(2_000)).max(50),
+      z.record(z.string().max(120), z.string().max(2_000)),
+    ])
     .optional(),
 });
 
@@ -107,26 +125,49 @@ const gyn4dPrintSettingsSchema = z.object({
   leftAdnexum: z.string().trim().max(160).optional(),
 });
 
-const templateLayoutSchema = z.object({
-  headerNote: z.string().trim().max(500).optional(),
-  footerNote: z.string().trim().max(1000).optional(),
-  showMeasurements: z.boolean().optional(),
-  showSignature: z.boolean().optional(),
-  printLayout: z.enum(['default', 'gyn4d']).optional(),
-  gyn4d: gyn4dPrintSettingsSchema.optional(),
-});
+const templateLayoutSchema = z
+  .object({
+    headerNote: z.string().trim().max(500).optional(),
+    footerNote: z.string().trim().max(1000).optional(),
+    showMeasurements: z.boolean().optional(),
+    showSignature: z.boolean().optional(),
+    printLayout: z.enum(['default', 'gyn4d', 'blocks']).optional(),
+    gyn4d: gyn4dPrintSettingsSchema.optional(),
+    definition: templateDefinitionSchema.optional(),
+  })
+  .superRefine((layout, ctx) => {
+    if ((layout.printLayout === 'blocks') !== (layout.definition !== undefined)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['definition'],
+        message: 'printLayout "blocks" and a definition must be used together.',
+      });
+    }
+  });
 
 const templateSchema = z.object({
   name: z.string().trim().min(1).max(160),
   description: z.string().trim().max(500).optional().or(z.literal('')),
   serviceId: uuidSchema.optional().nullable(),
-  fields: templateFieldsSchema,
+  fields: templateFieldsSchema.optional(),
   layout: templateLayoutSchema.nullable().optional(),
   isActive: z.boolean().default(true),
   isDefault: z.boolean().default(false),
 });
 
 const templatePatchSchema = templateSchema.partial();
+
+function blockErrors(errors: string[]): string {
+  const shown = errors.slice(0, 10).join('\n');
+  return errors.length > 10 ? `${shown}\n(+${errors.length - 10} more)` : shown;
+}
+
+function zodIssueStrings(error: z.ZodError): string[] {
+  return error.issues.map((issue) => {
+    const path = issue.path.length > 0 ? `${issue.path.join('.')}: ` : '';
+    return `${path}${issue.message}`;
+  });
+}
 
 function snapshotTemplate(template: {
   id: string;
@@ -246,6 +287,16 @@ reportsRouter.post(
     }
     await assertActiveService(payload.serviceId);
 
+    // Block templates always derive `fields` from the definition; client fields are ignored.
+    let fields: unknown = payload.fields;
+    if (payload.layout?.printLayout === 'blocks' && payload.layout.definition) {
+      const check = validateDefinition(payload.layout.definition);
+      if (!check.ok) throw badRequest(blockErrors(check.errors));
+      fields = check.fields;
+    } else if (!payload.fields) {
+      throw badRequest('Add at least one section.');
+    }
+
     const template = await prisma.$transaction(async (tx) => {
       const duplicate = await tx.reportTemplate.findUnique({ where: { name: payload.name } });
       if (duplicate) throw conflict('A template with this name already exists.');
@@ -260,7 +311,7 @@ reportsRouter.post(
           name: payload.name,
           description: payload.description || null,
           serviceId: payload.serviceId ?? null,
-          fields: payload.fields as unknown as Prisma.InputJsonValue,
+          fields: fields as unknown as Prisma.InputJsonValue,
           layout:
             payload.layout === undefined || payload.layout === null
               ? undefined
@@ -278,10 +329,53 @@ reportsRouter.post(
       metadata: {
         name: template.name,
         isDefault: template.isDefault,
-        fieldCount: payload.fields.length,
+        fieldCount: Array.isArray(fields) ? fields.length : 0,
       },
     });
     res.status(201).json({ template });
+  }),
+);
+
+const definitionBodySchema = z.object({ definition: z.unknown() });
+const previewSystem = {
+  'patient.name': 'Sample Patient',
+  'patient.dob': '01/01/1990',
+  'visit.date': '01/01/2026',
+} as const;
+
+reportsRouter.post(
+  '/templates/validate',
+  requirePermission('SETTINGS_MANAGE'),
+  asyncHandler(async (req, res) => {
+    const { definition } = parseBody(definitionBodySchema, req);
+    const parsed = templateDefinitionSchema.safeParse(definition);
+    if (!parsed.success) {
+      res.json({ ok: false, errors: zodIssueStrings(parsed.error), fieldCount: 0 });
+      return;
+    }
+    const check = validateDefinition(parsed.data as TemplateDefinition);
+    res.json({ ok: check.ok, errors: check.errors, fieldCount: check.fields.length });
+  }),
+);
+
+reportsRouter.post(
+  '/templates/preview',
+  requirePermission('SETTINGS_MANAGE'),
+  asyncHandler(async (req, res) => {
+    const { definition } = parseBody(definitionBodySchema, req);
+    const parsed = templateDefinitionSchema.safeParse(definition);
+    if (!parsed.success) throw badRequest(blockErrors(zodIssueStrings(parsed.error)));
+    const check = validateDefinition(parsed.data as TemplateDefinition);
+    if (!check.ok) throw badRequest(blockErrors(check.errors));
+    const html = renderReportHtml({
+      definition: parsed.data as TemplateDefinition,
+      content: buildInitialContent(check.fields),
+      system: previewSystem,
+      mode: 'print',
+      isDraft: false,
+    });
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ html });
   }),
 );
 
@@ -295,11 +389,37 @@ reportsRouter.patch(
     const existing = await prisma.reportTemplate.findUnique({ where: { id } });
     if (!existing) throw notFound('Template not found');
 
+    const existingLayout =
+      existing.layout && typeof existing.layout === 'object'
+        ? (existing.layout as { printLayout?: string; definition?: TemplateDefinition })
+        : null;
+    const wasBlocks = existingLayout?.printLayout === 'blocks';
+    const willBeBlocks =
+      payload.layout === undefined ? wasBlocks : payload.layout?.printLayout === 'blocks';
+    if (wasBlocks !== willBeBlocks) {
+      throw badRequest(
+        'A template cannot be converted between block and standard layouts. Create a new template.',
+      );
+    }
+
     if (payload.name && payload.name !== existing.name) {
       const duplicate = await prisma.reportTemplate.findUnique({ where: { name: payload.name } });
       if (duplicate) throw conflict('A template with this name already exists.');
     }
     await assertActiveService(payload.serviceId);
+
+    // Block templates keep their derived fields. A definition in the payload
+    // replaces them; any client-supplied `fields` is ignored.
+    let fields: unknown = payload.fields;
+    if (willBeBlocks) {
+      if (payload.layout?.definition) {
+        const check = validateDefinition(payload.layout.definition);
+        if (!check.ok) throw badRequest(blockErrors(check.errors));
+        fields = check.fields;
+      } else {
+        fields = undefined;
+      }
+    }
 
     const nextIsActive = payload.isActive ?? existing.isActive;
     let nextIsDefault = payload.isDefault ?? existing.isDefault;
@@ -320,9 +440,9 @@ reportsRouter.patch(
             payload.description === undefined ? undefined : payload.description || null,
           serviceId: payload.serviceId === undefined ? undefined : payload.serviceId,
           fields:
-            payload.fields === undefined
+            fields === undefined
               ? undefined
-              : (payload.fields as unknown as Prisma.InputJsonValue),
+              : (fields as unknown as Prisma.InputJsonValue),
           layout:
             payload.layout === undefined
               ? undefined
@@ -428,7 +548,7 @@ const createReportSchema = z.object({
   visitId: uuidSchema,
   templateId: uuidSchema.optional().nullable(),
   serviceId: uuidSchema.optional().nullable(),
-  content: contentSchema,
+  content: contentSchema.default({}),
 });
 
 reportsRouter.post(
@@ -437,7 +557,6 @@ reportsRouter.post(
   asyncHandler(async (req, res) => {
     const me = currentUser(req);
     const payload = parseBody(createReportSchema, req);
-    assertContentSize(payload.content);
 
     const visit = await prisma.visit.findUnique({
       where: { id: payload.visitId },
@@ -469,6 +588,25 @@ reportsRouter.post(
     }
     const snapshot = template ? snapshotTemplate(template) : null;
 
+    // Block templates always start from the definition's defaults; the client
+    // content is ignored. Standard templates keep today's behaviour.
+    let content = payload.content as Record<string, unknown>;
+    if (template) {
+      const layout =
+        template.layout && typeof template.layout === 'object'
+          ? (template.layout as { printLayout?: string; definition?: TemplateDefinition })
+          : null;
+      if (layout?.printLayout === 'blocks') {
+        if (!layout.definition) {
+          throw badRequest('This block template has no definition. Ask an administrator to fix it.');
+        }
+        const check = validateDefinition(layout.definition);
+        if (!check.ok) throw badRequest(blockErrors(check.errors));
+        content = buildInitialContent(check.fields);
+      }
+    }
+    assertContentSize(content);
+
     const report = await prisma.$transaction(async (tx) => {
       const created = await tx.report.create({
         data: {
@@ -480,7 +618,7 @@ reportsRouter.post(
             : undefined,
           templateVersion: snapshot?.version ?? null,
           serviceId: payload.serviceId ?? null,
-          currentContent: payload.content as Prisma.InputJsonValue,
+          currentContent: content as Prisma.InputJsonValue,
           versionNumber: 1,
           status: 'DRAFT',
         },
@@ -489,7 +627,7 @@ reportsRouter.post(
         data: {
           reportId: created.id,
           versionNumber: 1,
-          content: payload.content as Prisma.InputJsonValue,
+          content: content as Prisma.InputJsonValue,
           isFinal: false,
           authorId: me.id,
         },
@@ -899,6 +1037,50 @@ reportsRouter.get(
       throw badRequest('This report uses the standard print layout.');
     }
     res.type('html').send(renderGyn4dHtml(input));
+  }),
+);
+
+/** Editable and print HTML for block templates: one renderer for every mode. */
+reportsRouter.get(
+  '/:id/document',
+  requirePermission('CLINICAL_READ'),
+  asyncHandler(async (req, res) => {
+    const { id } = parseParams(z.object({ id: uuidSchema }), req);
+    const { mode } = parseQuery(
+      z.object({ mode: z.enum(['edit', 'print']).default('print') }),
+      req,
+    );
+    const me = currentUser(req);
+    const report = await prisma.report.findUnique({
+      where: { id },
+      include: {
+        template: true,
+        visit: {
+          include: {
+            patient: true,
+            doctor: { select: { firstName: true, lastName: true } },
+            measurements: true,
+          },
+        },
+      },
+    });
+    if (!report) throw notFound('Report not found');
+    assertClinicalRead(me, report.doctorId);
+    if (mode === 'edit') assertClinicalWrite(me, report.doctorId);
+    const input = await buildPdfInput(report);
+    const definition = input.report.templateLayout?.definition;
+    if (input.report.templateLayout?.printLayout !== 'blocks' || !definition) {
+      throw badRequest('This report does not use a block template.');
+    }
+    const html = renderReportHtml({
+      definition,
+      content: input.report.content,
+      system: systemValues(input),
+      mode,
+      isDraft: report.status === 'DRAFT',
+    });
+    res.setHeader('Cache-Control', 'no-store');
+    res.type('html').send(html);
   }),
 );
 

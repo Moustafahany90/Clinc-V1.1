@@ -1,0 +1,234 @@
+{
+  "name": "Fetal Echocardiography",
+  "description": "Fetal echocardiography scan",
+  "definition": {
+    "schemaVersion": 1,
+    "baseSize": 11,
+    "blocks": [
+      {
+        "type": "infoTable",
+        "rows": [
+          {
+            "label": "Name",
+            "source": "patient.name"
+          },
+          {
+            "label": "Exam Date",
+            "source": "visit.date"
+          },
+          {
+            "label": "LMP",
+            "key": "lmp",
+            "placeholder": "dd/mm/yyyy"
+          },
+          {
+            "label": "EDD by date",
+            "key": "eddByDate",
+            "placeholder": "dd/mm/yyyy"
+          },
+          {
+            "label": "Scan quality",
+            "key": "scanQuality",
+            "default": "Good quality scan"
+          },
+          {
+            "label": "Serial Visit No",
+            "key": "serialVisit",
+            "default": "1"
+          },
+          {
+            "label": "Referred By prof Dr/",
+            "key": "referredBy",
+            "boxed": true
+          }
+        ]
+      },
+      {
+        "type": "title",
+        "text": "Fetal Echocardiography"
+      },
+      {
+        "type": "text",
+        "template": "{{pregnancy}}",
+        "fields": {
+          "pregnancy": {
+            "default": "Single intrauterine pregnancy."
+          }
+        }
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "template": "Fetal life is positive, with regular rhythmic heart Rate (FHR = {{fhr}})",
+            "fields": {
+              "fhr": {
+                "placeholder": "bpm"
+              }
+            }
+          }
+        ],
+        "style": "bullet"
+      },
+      {
+        "type": "section",
+        "title": "Axial cardiac planes",
+        "children": [
+          {
+            "type": "list",
+            "items": [
+              {
+                "template": "{{situs}}",
+                "fields": {
+                  "situs": {
+                    "default": "Situs solitus , levocardia"
+                  }
+                }
+              },
+              {
+                "template": "{{cardiomegaly}}",
+                "fields": {
+                  "cardiomegaly": {
+                    "default": "No cardiomegaly"
+                  }
+                }
+              },
+              {
+                "label": "Four chamber view:",
+                "template": "",
+                "children": [
+                  {
+                    "template": "{{avConcordant}}",
+                    "fields": {
+                      "avConcordant": {
+                        "default": "A-V concordant"
+                      }
+                    }
+                  },
+                  {
+                    "template": "{{vaConcordant}}",
+                    "fields": {
+                      "vaConcordant": {
+                        "default": "V-A concordant"
+                      }
+                    }
+                  },
+                  {
+                    "template": "{{ivs}}",
+                    "fields": {
+                      "ivs": {
+                        "default": "Intact interventricular septum : (VSD less than 2mm could missed during exam due to its small size)"
+                      }
+                    }
+                  },
+                  {
+                    "template": "{{pulmonaryVeins}}",
+                    "fields": {
+                      "pulmonaryVeins": {
+                        "default": "both pulmonary veins are presents"
+                      }
+                    }
+                  },
+                  {
+                    "template": "{{crux}}",
+                    "fields": {
+                      "crux": {
+                        "default": "cardiac Crux: present and intact"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "label": "Left outflow tract :-",
+                "template": " {{lvot}}",
+                "fields": {
+                  "lvot": {
+                    "default": "no abnormality detected at scan time"
+                  }
+                }
+              },
+              {
+                "label": "Right outflow tract:",
+                "template": " {{rvot}}",
+                "fields": {
+                  "rvot": {
+                    "default": "no abnormality detected at scan time"
+                  }
+                }
+              },
+              {
+                "label": "Three vessels trachea view :-",
+                "template": " {{threeVessels}}",
+                "fields": {
+                  "threeVessels": {
+                    "default": "no abnormality detected at scan time"
+                  }
+                }
+              }
+            ],
+            "style": "circle",
+            "childStyle": "bullet"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Sagittal cardiac planes",
+        "children": [
+          {
+            "type": "list",
+            "items": [
+              {
+                "label": "Aortic Arch :",
+                "template": " {{aorticArch}}",
+                "fields": {
+                  "aorticArch": {
+                    "default": "no abnormality detected at scan time"
+                  }
+                }
+              },
+              {
+                "label": "Ductal Arch :",
+                "template": " {{ductalArch}}",
+                "fields": {
+                  "ductalArch": {
+                    "default": "no abnormality detected at scan time"
+                  }
+                }
+              },
+              {
+                "label": "Bicaval View :",
+                "template": " {{bicaval}}",
+                "fields": {
+                  "bicaval": {
+                    "default": "no abnormality detected at scan time"
+                  }
+                }
+              }
+            ],
+            "style": "circle"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Conclusion: -",
+        "children": [
+          {
+            "type": "freeList",
+            "key": "conclusion",
+            "style": "none",
+            "bold": true,
+            "default": [
+              "No cardiac abnormality was detected at scan time"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "signature"
+      }
+    ]
+  }
+}

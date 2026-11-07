@@ -1,0 +1,282 @@
+{
+  "name": "4D 10 Weeks Obstetric Scan",
+  "description": "First trimester scan at 10 weeks",
+  "definition": {
+    "schemaVersion": 1,
+    "baseSize": 11,
+    "blocks": [
+      {
+        "type": "infoTable",
+        "rows": [
+          {
+            "label": "Name",
+            "source": "patient.name"
+          },
+          {
+            "label": "Exam Date",
+            "source": "visit.date"
+          },
+          {
+            "label": "LMP",
+            "key": "lmp",
+            "placeholder": "dd/mm/yyyy"
+          },
+          {
+            "label": "EDD by date",
+            "key": "eddByDate",
+            "placeholder": "dd/mm/yyyy"
+          },
+          {
+            "label": "EDD by U/S",
+            "key": "eddByUs",
+            "placeholder": "dd/mm/yyyy"
+          },
+          {
+            "label": "Scan quality",
+            "key": "scanQuality",
+            "default": "Good quality scan"
+          },
+          {
+            "label": "Serial Visit No",
+            "key": "serialVisit",
+            "default": "1"
+          },
+          {
+            "label": "Referred By prof Dr/",
+            "key": "referredBy",
+            "boxed": true
+          }
+        ]
+      },
+      {
+        "type": "title",
+        "text": "4D&5D OBSTETRIC SCAN"
+      },
+      {
+        "type": "text",
+        "template": "{{sacType}}",
+        "fields": {
+          "sacType": {
+            "default": "Single intrauterine gestational sac"
+          }
+        }
+      },
+      {
+        "type": "text",
+        "template": "{{sacLocation}}",
+        "fields": {
+          "sacLocation": {
+            "default": "The sac is fundal in location, regular in shape."
+          }
+        }
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "template": "{{fetalPole}}",
+            "fields": {
+              "fetalPole": {
+                "default": "Fetal pole was seen inside with regular fetal pulsation"
+              }
+            }
+          },
+          {
+            "template": "Fetal Heart Rate (FHR) = {{fhr}}",
+            "fields": {
+              "fhr": {
+                "placeholder": "bpm"
+              }
+            }
+          }
+        ],
+        "style": "bullet"
+      },
+      {
+        "type": "section",
+        "title": "Gestational age assessment:",
+        "children": [
+          {
+            "type": "gridTable",
+            "widths": [
+              3,
+              4
+            ],
+            "rows": [
+              {
+                "cells": [
+                  {
+                    "template": "Crown Rump Length (CRL)"
+                  },
+                  {
+                    "template": "{{crl}}",
+                    "fields": {
+                      "crl": {
+                        "placeholder": "mm"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "Expected Gestational Age (EGA)"
+                  },
+                  {
+                    "template": "{{ega}}",
+                    "fields": {
+                      "ega": {
+                        "placeholder": "weeks"
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "border": "all"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "template": "{{chorionic}}",
+        "fields": {
+          "chorionic": {
+            "default": "The chorionic tissue is seen all around"
+          }
+        }
+      },
+      {
+        "type": "text",
+        "template": "{{retrochorionic}}",
+        "fields": {
+          "retrochorionic": {
+            "default": "Retrochorionic space is free : no hematoma nor separation"
+          }
+        }
+      },
+      {
+        "type": "text",
+        "template": "{{amnioticFluid}}",
+        "fields": {
+          "amnioticFluid": {
+            "default": "Amniotic Fluid: clear with average volume for gestational age ."
+          }
+        }
+      },
+      {
+        "type": "text",
+        "template": "{{fibroids}}",
+        "fields": {
+          "fibroids": {
+            "default": "No Fibroids were detected."
+          }
+        }
+      },
+      {
+        "type": "section",
+        "title": "Adnexae:",
+        "children": [
+          {
+            "type": "list",
+            "items": [
+              {
+                "template": "{{rightOvary}}",
+                "fields": {
+                  "rightOvary": {
+                    "default": "Right ovary is normal site, size and texture"
+                  }
+                }
+              },
+              {
+                "template": "{{leftOvary}}",
+                "fields": {
+                  "leftOvary": {
+                    "default": "Left ovary is normal site, size and texture"
+                  }
+                }
+              }
+            ],
+            "style": "bullet"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Cervical canal biometry :",
+        "children": [
+          {
+            "type": "list",
+            "items": [
+              {
+                "template": "Internal OS inner to inner diameter : {{internalOs}}",
+                "fields": {
+                  "internalOs": {
+                    "placeholder": "mm"
+                  }
+                }
+              },
+              {
+                "template": "Cervical canal length : {{cervicalLength}}",
+                "fields": {
+                  "cervicalLength": {
+                    "placeholder": "mm"
+                  }
+                }
+              }
+            ],
+            "style": "circle"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Douglas pouch :-",
+        "children": [
+          {
+            "type": "text",
+            "template": "{{douglas}}",
+            "fields": {
+              "douglas": {
+                "default": "No fluid nor masses in the DP"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "2D Colour Doppler Study:",
+        "children": [
+          {
+            "type": "text",
+            "template": "{{doppler}}",
+            "fields": {
+              "doppler": {
+                "default": "Color Doppler study of the gestational sac bl. Flow revealed normal value ."
+              }
+            }
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Conclusion :",
+        "children": [
+          {
+            "type": "freeList",
+            "key": "conclusion",
+            "bold": true,
+            "default": [
+              "Single Intrauterine pregnancy weeks for follow up"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "signature"
+      }
+    ]
+  }
+}

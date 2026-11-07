@@ -1,6 +1,7 @@
 import PDFDocument from 'pdfkit';
 import type { ReportTemplateField, ReportTemplateLayout } from './reportTypes.js';
 import { renderGyn4dPdf } from './gyn4d.js';
+import { renderBlocksPdf } from './report-blocks/pdf.js';
 
 export interface ReportPdfInput {
   clinic: {
@@ -182,6 +183,7 @@ function twoColumn(doc: PDFKit.PDFDocument, pairs: Array<[string, string]>): voi
 
 export async function renderReportPdf(input: ReportPdfInput): Promise<Buffer> {
   if (input.report.templateLayout?.printLayout === 'gyn4d') return renderGyn4dPdf(input);
+  if (input.report.templateLayout?.printLayout === 'blocks') return renderBlocksPdf(input);
   const doc = new PDFDocument({
     size: 'A4',
     margins: { top: MARGIN, right: MARGIN, bottom: FOOTER_HEIGHT, left: MARGIN },

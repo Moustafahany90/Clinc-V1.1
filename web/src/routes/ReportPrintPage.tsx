@@ -10,6 +10,7 @@ import type {
   ReportTemplateLayout,
 } from '../lib/types';
 import { Alert, Button, LoadingBlock } from '../components/ui';
+import { ReportDocumentFrame, type ReportDocumentHandle } from '../components/ReportDocumentFrame';
 
 interface PrintData {
   clinic: {
@@ -98,7 +99,11 @@ export function ReportPrintPage() {
   if (!data) return null;
 
   if (data.report.templateLayout?.printLayout === 'gyn4d') {
-    return <Gyn4dPrintView data={data} />;
+    return <HtmlDocumentPrintView data={data} url={`/reports/${data.report.id}/print-html`} />;
+  }
+
+  if (data.report.templateLayout?.printLayout === 'blocks') {
+    return <BlockPrintView data={data} />;
   }
 
   const { clinic, report, patient, examination } = data;
@@ -294,43 +299,62 @@ export function ReportPrintPage() {
   );
 }
 
-function Gyn4dPrintView({ data }: { data: PrintData }) {
+function PrintToolbar({
+  data,
+  onPrint,
+  disabled,
+}: {
+  data: PrintData;
+  onPrint: () => void;
+  disabled?: boolean;
+}) {
   const { report, clinic } = data;
+  return (
+    <div className="no-print mx-auto mb-4 flex w-[8.5in] max-w-[calc(100%-1.5rem)] flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="secondary" asChild>
+          <Link to={`/reports/${report.id}`}>
+            <ArrowLeft className="h-4 w-4" aria-hidden />
+            Back to report
+          </Link>
+        </Button>
+        <span className="text-[12px] text-ink-500">
+          Version {report.versionNumber}
+          {report.finalizedAt
+            ? ` · finalized ${formatDateTime(report.finalizedAt, clinic.timezone)}`
+            : ' · draft'}
+          {report.templateName ? ` · ${report.templateName}` : ''}
+        </span>
+      </div>
+      <Button onClick={onPrint} disabled={disabled}>
+        <Printer className="h-4 w-4" aria-hidden />
+        Print / Save as PDF
+      </Button>
+    </div>
+  );
+}
+
+function HtmlDocumentPrintView({ data, url }: { data: PrintData; url: string }) {
+  const { report } = data;
   const frame = useRef<HTMLIFrameElement | null>(null);
   const htmlState = useAsyncData<string>(
     async () =>
       (
-        await api.get<string>(`/reports/${report.id}/print-html`, {
+        await api.get<string>(url, {
           responseType: 'text',
           transformResponse: (raw) => raw,
         })
       ).data,
-    [report.id],
+    [url],
   );
 
   return (
     <div className="min-h-dvh bg-ink-100/60 py-6 print:bg-white print:py-0">
-      <div className="no-print mx-auto mb-4 flex w-[8.5in] max-w-[calc(100%-1.5rem)] flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" asChild>
-            <Link to={`/reports/${report.id}`}>
-              <ArrowLeft className="h-4 w-4" aria-hidden />
-              Back to report
-            </Link>
-          </Button>
-          <span className="text-[12px] text-ink-500">
-            Version {report.versionNumber}
-            {report.finalizedAt
-              ? ` · finalized ${formatDateTime(report.finalizedAt, clinic.timezone)}`
-              : ' · draft'}
-            {report.templateName ? ` · ${report.templateName}` : ''}
-          </span>
-        </div>
-        <Button onClick={() => frame.current?.contentWindow?.print()} disabled={!htmlState.data}>
-          <Printer className="h-4 w-4" aria-hidden />
-          Print / Save as PDF
-        </Button>
-      </div>
+      <PrintToolbar
+        data={data}
+        onPrint={() => frame.current?.contentWindow?.print()}
+        disabled={!htmlState.data}
+      />
 
       {htmlState.error && (
         <div className="mx-auto max-w-2xl p-4">
@@ -350,6 +374,23 @@ function Gyn4dPrintView({ data }: { data: PrintData }) {
           />
         )
       )}
+    </div>
+  );
+}
+
+function BlockPrintView({ data }: { data: PrintData }) {
+  const { report } = data;
+  const frame = useRef<ReportDocumentHandle | null>(null);
+
+  return (
+    <div className="min-h-dvh bg-ink-100/60 py-6 print:bg-white print:py-0">
+      <PrintToolbar data={data} onPrint={() => frame.current?.print()} />
+      <ReportDocumentFrame
+        ref={frame}
+        reportId={report.id}
+        docKey={`${report.id}:${report.versionNumber}`}
+        mode="print"
+      />
     </div>
   );
 }

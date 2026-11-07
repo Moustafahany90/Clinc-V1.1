@@ -1,0 +1,448 @@
+{
+  "name": "4D Gynecology Scan",
+  "description": "4D transvaginal gynecology scan",
+  "definition": {
+    "schemaVersion": 1,
+    "baseSize": 14,
+    "blocks": [
+      {
+        "type": "infoTable",
+        "rows": [
+          {
+            "label": "Name",
+            "source": "patient.name"
+          },
+          {
+            "label": "Exam. Date",
+            "source": "visit.date"
+          },
+          {
+            "label": "Date of Birth",
+            "source": "patient.dob"
+          },
+          {
+            "label": "LMP",
+            "key": "lmp",
+            "placeholder": "dd/mm/yyyy"
+          },
+          {
+            "label": "Serial Visit No",
+            "key": "serialVisit",
+            "default": "1"
+          },
+          {
+            "label": "Scan quality",
+            "key": "scanQuality",
+            "default": "Good quality scan"
+          },
+          {
+            "label": "Route of scan",
+            "key": "routeOfScan",
+            "default": "Transvaginal Scan",
+            "bold": true
+          },
+          {
+            "label": "Referred By Prof Dr/",
+            "key": "referredBy",
+            "boxed": true
+          }
+        ]
+      },
+      {
+        "type": "title",
+        "text": "Gynecology",
+        "boldPrefix": "4D ",
+        "suffix": "SCAN"
+      },
+      {
+        "type": "section",
+        "title": "Uterus:",
+        "children": [
+          {
+            "type": "text",
+            "template": "{{uterusDesc}}",
+            "fields": {
+              "uterusDesc": {
+                "default": "Uterus is AVF , with symmetrical appearance."
+              }
+            }
+          },
+          {
+            "type": "list",
+            "items": [
+              {
+                "label": "Uterine measurements:",
+                "template": " {{uterineMeasurements}}",
+                "fields": {
+                  "uterineMeasurements": {
+                    "placeholder": "60 x 30 x 45mm"
+                  }
+                }
+              },
+              {
+                "template": "{{uterusMobility}}",
+                "fields": {
+                  "uterusMobility": {
+                    "default": "Mobile uterus"
+                  }
+                },
+                "bold": true,
+                "underline": true
+              },
+              {
+                "label": "Endometrium:",
+                "template": "",
+                "subtitle": "3D rendering of the endometrium showing :-",
+                "children": [
+                  {
+                    "template": "{{endoCavity}}",
+                    "fields": {
+                      "endoCavity": {
+                        "default": "Endometrial cavity is inverted triangle in coronal view"
+                      }
+                    }
+                  },
+                  {
+                    "template": "{{endoTexture}}",
+                    "fields": {
+                      "endoTexture": {
+                        "default": "Endometrium is homogeneous in texture with thickness = "
+                      }
+                    }
+                  },
+                  {
+                    "template": "**{{endoJunctionStatus}}** {{endoJunction}}",
+                    "fields": {
+                      "endoJunctionStatus": {
+                        "default": "Normal"
+                      },
+                      "endoJunction": {
+                        "default": "endometrial myometrial junction"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "label": "Myometrium:",
+                "template": "",
+                "children": [
+                  {
+                    "template": "{{myometrium}}",
+                    "fields": {
+                      "myometrium": {
+                        "default": "Myometrium is homogeneous with no focal lesion"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "label": "Cervix & Cervical Canal",
+                "template": " :",
+                "children": [
+                  {
+                    "template": "{{cervixFinding}}",
+                    "fields": {
+                      "cervixFinding": {
+                        "default": "No abnormality detected at scan time"
+                      }
+                    }
+                  },
+                  {
+                    "template": "Cervical Length : {{cervicalLength}}",
+                    "fields": {
+                      "cervicalLength": {
+                        "placeholder": "33mm"
+                      }
+                    }
+                  }
+                ]
+              }
+            ],
+            "style": "bullet",
+            "childStyle": "circle"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Right adnexum:",
+        "children": [
+          {
+            "type": "gridTable",
+            "widths": [
+              33,
+              67
+            ],
+            "rows": [
+              {
+                "cells": [
+                  {
+                    "template": "Dimensions",
+                    "bold": true
+                  },
+                  {
+                    "template": "{{rightOvaryDimensions}}",
+                    "fields": {
+                      "rightOvaryDimensions": {
+                        "placeholder": "mm"
+                      }
+                    }
+                  }
+                ],
+                "rule": "top"
+              },
+              {
+                "cells": [
+                  {
+                    "template": "Ovarian volume:",
+                    "bold": true
+                  },
+                  {
+                    "template": "{{rightOvaryVolume}}",
+                    "fields": {
+                      "rightOvaryVolume": {}
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "Mobility of ovary:",
+                    "bold": true
+                  },
+                  {
+                    "template": "{{rightOvaryMobility}}",
+                    "fields": {
+                      "rightOvaryMobility": {
+                        "default": "mobile"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "Texture of ovary",
+                    "bold": true
+                  },
+                  {
+                    "template": "{{rightOvaryTexture}}",
+                    "fields": {
+                      "rightOvaryTexture": {
+                        "default": "normal texture"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "Dominant follicles:",
+                    "bold": true
+                  },
+                  {
+                    "template": "{{rightOvaryFollicles}}",
+                    "fields": {
+                      "rightOvaryFollicles": {
+                        "default": "No"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "Other adnexal abnormalities",
+                    "bold": true,
+                    "underline": true,
+                    "rightRule": true
+                  },
+                  {
+                    "template": "{{rightOvaryOther}}",
+                    "fields": {
+                      "rightOvaryOther": {
+                        "default": "No"
+                      }
+                    }
+                  }
+                ],
+                "rule": "both"
+              }
+            ],
+            "border": "lines",
+            "title": "Right ovary:"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Left adnexum:",
+        "children": [
+          {
+            "type": "gridTable",
+            "widths": [
+              33,
+              67
+            ],
+            "rows": [
+              {
+                "cells": [
+                  {
+                    "template": "Dimensions",
+                    "bold": true
+                  },
+                  {
+                    "template": "{{leftOvaryDimensions}}",
+                    "fields": {
+                      "leftOvaryDimensions": {
+                        "placeholder": "mm"
+                      }
+                    }
+                  }
+                ],
+                "rule": "top"
+              },
+              {
+                "cells": [
+                  {
+                    "template": "Ovarian volume:",
+                    "bold": true
+                  },
+                  {
+                    "template": "{{leftOvaryVolume}}",
+                    "fields": {
+                      "leftOvaryVolume": {}
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "Mobility of ovary:",
+                    "bold": true
+                  },
+                  {
+                    "template": "{{leftOvaryMobility}}",
+                    "fields": {
+                      "leftOvaryMobility": {
+                        "default": "mobile"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "Texture of ovary",
+                    "bold": true
+                  },
+                  {
+                    "template": "{{leftOvaryTexture}}",
+                    "fields": {
+                      "leftOvaryTexture": {
+                        "default": "normal texture"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "Dominant follicles:",
+                    "bold": true
+                  },
+                  {
+                    "template": "{{leftOvaryFollicles}}",
+                    "fields": {
+                      "leftOvaryFollicles": {
+                        "default": "No"
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "cells": [
+                  {
+                    "template": "Other adnexal abnormalities",
+                    "bold": true,
+                    "underline": true,
+                    "rightRule": true
+                  },
+                  {
+                    "template": "{{leftOvaryOther}}",
+                    "fields": {
+                      "leftOvaryOther": {
+                        "default": "No"
+                      }
+                    }
+                  }
+                ],
+                "rule": "both"
+              }
+            ],
+            "border": "lines",
+            "title": "Left ovary:"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Douglas Pouch:",
+        "children": [
+          {
+            "type": "list",
+            "items": [
+              {
+                "template": "{{douglasSliding}}",
+                "fields": {
+                  "douglasSliding": {
+                    "default": "Positive sliding sign of DP"
+                  }
+                }
+              },
+              {
+                "template": "{{douglasFluid}}",
+                "fields": {
+                  "douglasFluid": {
+                    "default": "No Fluid collection:"
+                  }
+                }
+              }
+            ],
+            "style": "circle",
+            "small": true,
+            "bold": true
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "title": "Conclusion :",
+        "children": [
+          {
+            "type": "freeList",
+            "key": "conclusion",
+            "bold": true,
+            "default": [
+              "AVF uterus",
+              "Normal Both ovaries"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "signature"
+      }
+    ]
+  }
+}
