@@ -17,6 +17,7 @@ import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useClinic } from '../lib/clinic';
 import { useAsyncData } from '../lib/hooks';
+import { formatMoney } from '../lib/money';
 import {
   addDays,
   formatTime,
@@ -25,6 +26,13 @@ import {
 } from '../lib/format';
 import type { PaymentMethod, Patient, QueueEntry, Service } from '../lib/types';
 import { PatientSearch } from '../components/PatientSearch';
+import {
+  BookingPaymentFields,
+  bookingPaymentPayload,
+  emptyBookingPayment,
+  validateBookingPayment,
+  type BookingPaymentValue,
+} from '../components/BookingPaymentFields';
 import { ReasonDialog } from '../components/dialogs';
 import { useToast } from '../components/toast';
 import {
@@ -450,11 +458,12 @@ function WalkInDialog({
   onCreated: () => void;
 }) {
   const { user } = useAuth();
-  const { doctors, services } = useClinic();
+  const { doctors, services, paymentMethods, currency } = useClinic();
   const toast = useToast();
   const [patient, setPatient] = useState<Patient | null>(null);
   const [doctorId, setDoctorId] = useState('');
   const [serviceId, setServiceId] = useState('');
+  const [payment, setPayment] = useState<BookingPaymentValue>(emptyBookingPayment);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -463,6 +472,7 @@ function WalkInDialog({
     setPatient(null);
     setDoctorId(user?.role === 'DOCTOR' ? user.id : doctors[0]?.id ?? '');
     setServiceId('');
+    setPayment(emptyBookingPayment);
     setBusy(false);
     setError(null);
   }, [open, user, doctors]);
@@ -471,6 +481,14 @@ function WalkInDialog({
     () => services.filter((service) => service.isActive),
     [services],
   );
+
+  const selectedService = activeServices.find((service) => service.id === serviceId) ?? null;
+  const servicePriceMinor = selectedService?.priceMinor ?? 0;
+
+  function chooseService(nextId: string) {
+    setServiceId(nextId);
+    setPayment(emptyBookingPayment);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -483,12 +501,23 @@ function WalkInDialog({
       setError('Select the doctor who will see the patient.');
       return;
     }
+    if (selectedService) {
+      const paymentError = validateBookingPayment(payment, servicePriceMinor, paymentMethods);
+      if (paymentError) {
+        setError(paymentError);
+        return;
+      }
+    }
     setBusy(true);
     try {
+      const paymentPayload = selectedService
+        ? bookingPaymentPayload(payment, servicePriceMinor)
+        : undefined;
       await api.post('/queue/walk-in', {
         patientId: patient.id,
         doctorId,
         ...(serviceId ? { serviceId } : {}),
+        ...(paymentPayload ? { payment: paymentPayload } : {}),
       });
       toast.success('Walk-in added to the queue', `${patient.firstName} ${patient.lastName}`);
       onCreated();
@@ -528,16 +557,38 @@ function WalkInDialog({
                 ))}
               </Select>
             </Field>
-            <Field label="Service" hint="Optional. Its duration is used for the appointment.">
-              <Select value={serviceId} onChange={(event) => setServiceId(event.target.value)}>
+            <Field
+              label="Service"
+              hint="Optional. Sets the duration and records the configured price in Accounting."
+            >
+              <Select value={serviceId} onChange={(event) => chooseService(event.target.value)}>
                 <option value="">No specific service</option>
                 {activeServices.map((service) => (
                   <option key={service.id} value={service.id}>
-                    {service.name} · {service.durationMinutes} min
+                    {service.name} · {formatMoney(service.priceMinor, currency)} ·{' '}
+                    {service.durationMinutes} min
                   </option>
                 ))}
               </Select>
+              {selectedService && (
+                <p className="mt-1 text-[11px] font-medium text-ink-600">
+                  Price: {formatMoney(selectedService.priceMinor, currency)}
+                  {selectedService.priceMinor <= 0 && ' · no automatic charge'}
+                </p>
+              )}
             </Field>
+
+            {selectedService && (
+              <BookingPaymentFields
+                priceMinor={servicePriceMinor}
+                currency={currency}
+                value={payment}
+                onChange={setPayment}
+                paymentMethods={paymentMethods}
+                disabled={busy}
+                idPrefix="walkin-payment"
+              />
+            )}
           </DialogBody>
           <DialogFooter>
             <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={busy}>

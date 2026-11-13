@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Banknote, ReceiptText, Undo2 } from 'lucide-react';
 import { api, errorMessage, toApiFailure } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -11,6 +11,7 @@ import { useToast } from './toast';
 import {
   Alert,
   Button,
+  Checkbox,
   Dialog,
   DialogBody,
   DialogContent,
@@ -230,15 +231,17 @@ export function PaymentDialog({
   onOpenChange,
   patient: presetPatient = null,
   seedAmountMinor,
+  seedChargeId,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   patient?: Patient | null;
   seedAmountMinor?: number;
+  seedChargeId?: string;
   onSaved?: () => void;
 }) {
-  const { paymentMethods } = useClinic();
+  const { paymentMethods, currency } = useClinic();
   const { hasPermission } = useAuth();
   const toast = useToast();
   const [patient, setPatient] = useState<Patient | null>(presetPatient);
@@ -248,6 +251,8 @@ export function PaymentDialog({
   const [notes, setNotes] = useState('');
   const [charges, setCharges] = useState<OpenCharge[]>([]);
   const [allocations, setAllocations] = useState<Record<string, string>>({});
+  const [manualAllocation, setManualAllocation] = useState(false);
+  const autoAllocatedRef = useRef(false);
   const [loadingCharges, setLoadingCharges] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -272,16 +277,20 @@ export function PaymentDialog({
     setNotes('');
     setCharges([]);
     setAllocations({});
+    setManualAllocation(false);
+    autoAllocatedRef.current = false;
     setBusy(false);
     setError(null);
   });
 
   useEffect(() => {
-    if (!open || !patient) {
-      setCharges([]);
-      setAllocations({});
-      return;
-    }
+    // A new patient (or a fresh open) starts from a clean allocation state.
+    setCharges([]);
+    setAllocations({});
+    setManualAllocation(false);
+    autoAllocatedRef.current = false;
+
+    if (!open || !patient) return;
     if (!hasPermission('PAYMENTS_READ')) return;
     let active = true;
     setLoadingCharges(true);
@@ -303,7 +312,40 @@ export function PaymentDialog({
     };
   }, [open, patient, hasPermission]);
 
+  // Pre-select a charge once the list loads: an explicit Collect target, or the
+  // only open charge. Auto-allocation then follows the typed amount until the
+  // user edits an allocation by hand.
+  useEffect(() => {
+    if (!open || autoAllocatedRef.current || charges.length === 0) return;
+    autoAllocatedRef.current = true;
+
+    const seed = seedChargeId ? charges.find((charge) => charge.id === seedChargeId) : undefined;
+    const target = seed ?? (charges.length === 1 ? charges[0] : undefined);
+    if (!target) return;
+
+    setAllocations({ [target.id]: minorToInput(target.balanceMinor) });
+    setAmount((current) => current || minorToInput(target.balanceMinor));
+  }, [open, charges, seedChargeId]);
+
+  // Keep a single selected charge in step with the amount received.
+  useEffect(() => {
+    if (!open || manualAllocation) return;
+    const selected = Object.keys(allocations);
+    if (selected.length !== 1) return;
+    const charge = charges.find((item) => item.id === selected[0]);
+    if (!charge) return;
+
+    const take = Math.min(amountMinor, charge.balanceMinor);
+    const next = take > 0 ? minorToInput(take) : '';
+    setAllocations((prev) => {
+      if (!(charge.id in prev)) return prev;
+      if ((prev[charge.id] ?? '') === next) return prev;
+      return { ...prev, [charge.id]: next };
+    });
+  }, [open, manualAllocation, amountMinor, charges, allocations]);
+
   function applyRemainder() {
+    setManualAllocation(true);
     let remaining = amountMinor;
     const next: Record<string, string> = {};
     for (const charge of charges) {
@@ -318,12 +360,14 @@ export function PaymentDialog({
   }
 
   function toggleCharge(charge: OpenCharge, checked: boolean) {
+    setManualAllocation(true);
     setAllocations((prev) => {
       const next = { ...prev };
       if (checked) {
         const remaining = Math.max(0, amountMinor - allocatedMinor);
         const take = Math.min(charge.balanceMinor, remaining || charge.balanceMinor);
         next[charge.id] = minorToInput(take);
+        if (amountMinor <= 0) setAmount(minorToInput(take));
       } else {
         delete next[charge.id];
       }
@@ -350,6 +394,31 @@ export function PaymentDialog({
       setError(`${selectedMethod.label} payments require a reference number.`);
       return;
     }
+
+    const allocationList = charges
+      .filter((charge) => charge.id in allocations)
+      .map((charge) => ({
+        charge,
+        amountMinor: parseMoneyToMinor(allocations[charge.id] ?? '') ?? 0,
+      }));
+
+    for (const item of allocationList) {
+      if (item.amountMinor < 1) {
+        setError(`Enter an amount to apply to ${item.charge.description}, or uncheck it.`);
+        return;
+      }
+      if (item.amountMinor > item.charge.balanceMinor) {
+        setError(`The amount applied to ${item.charge.description} cannot exceed its balance.`);
+        return;
+      }
+    }
+
+    const totalAllocatedMinor = allocationList.reduce((sum, item) => sum + item.amountMinor, 0);
+    if (totalAllocatedMinor > amountMinor) {
+      setError('Allocated amounts cannot exceed the payment total.');
+      return;
+    }
+
     setBusy(true);
     try {
       await api.post('/payments', {
@@ -358,9 +427,17 @@ export function PaymentDialog({
         methodKey,
         reference: reference.trim(),
         notes: notes.trim(),
-        allocations: [],
+        allocations: allocationList.map((item) => ({
+          chargeId: item.charge.id,
+          amountMinor: item.amountMinor,
+        })),
       });
-      toast.success('Payment recorded', formatMoney(amountMinor));
+      toast.success(
+        'Payment recorded',
+        totalAllocatedMinor > 0
+          ? `${formatMoney(amountMinor, currency)} · ${formatMoney(totalAllocatedMinor, currency)} applied to charges`
+          : `${formatMoney(amountMinor, currency)} · kept as patient credit`,
+      );
       onSaved?.();
       onOpenChange(false);
     } catch (err) {
@@ -444,6 +521,95 @@ export function PaymentDialog({
                 />
               </Field>
             </div>
+
+            {hasPermission('PAYMENTS_READ') && (
+              <section className="rounded-xl border border-line bg-surface-muted/40 px-3.5 py-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[12px] font-semibold text-ink-800">Apply to open charges</p>
+                  {charges.length > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={applyRemainder}
+                      disabled={busy || amountMinor <= 0}
+                    >
+                      Apply remainder
+                    </Button>
+                  )}
+                </div>
+
+                {loadingCharges ? (
+                  <p className="mt-1 text-[11px] text-ink-500">Loading open charges…</p>
+                ) : charges.length === 0 ? (
+                  <p className="mt-1 text-[11px] text-ink-500">
+                    No open charges. This payment will be kept as patient credit.
+                  </p>
+                ) : (
+                  <>
+                    <p className="mt-0.5 text-[11px] text-ink-500">
+                      Choose what this money settles. Anything left over stays as patient credit.
+                    </p>
+                    <ul className="mt-3 space-y-2">
+                      {charges.map((charge) => {
+                        const checked = charge.id in allocations;
+                        return (
+                          <li
+                            key={charge.id}
+                            className="rounded-lg border border-line bg-white px-3 py-2"
+                          >
+                            <div className="flex items-center gap-3">
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(next) => toggleCharge(charge, next)}
+                                disabled={busy}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[12px] font-medium text-ink-800">
+                                  {charge.description}
+                                </p>
+                                <p className="text-[11px] text-ink-500">
+                                  Balance {formatMoney(charge.balanceMinor, currency)}
+                                </p>
+                              </div>
+                              <Input
+                                inputMode="decimal"
+                                value={allocations[charge.id] ?? ''}
+                                onChange={(event) => {
+                                  setManualAllocation(true);
+                                  setAllocations((prev) => ({
+                                    ...prev,
+                                    [charge.id]: event.target.value,
+                                  }));
+                                }}
+                                disabled={!checked || busy}
+                                className="w-24 text-right"
+                                aria-label={`Amount to apply to ${charge.description}`}
+                              />
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                      <span className="text-ink-500">
+                        Allocated{' '}
+                        <span className="font-semibold text-ink-800">
+                          {formatMoney(allocatedMinor, currency)}
+                        </span>{' '}
+                        of{' '}
+                        <span className="font-semibold text-ink-800">
+                          {formatMoney(amountMinor, currency)}
+                        </span>
+                      </span>
+                      <span className={unallocatedMinor > 0 ? 'text-amber-ink' : 'text-ink-500'}>
+                        Unallocated credit {formatMoney(unallocatedMinor, currency)}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
           </DialogBody>
           <DialogFooter>
             <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={busy}>

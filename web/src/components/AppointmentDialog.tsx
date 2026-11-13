@@ -19,8 +19,16 @@ import {
   todayInZone,
 } from '../lib/format';
 import { splitName } from '../lib/utils';
+import { formatMoney } from '../lib/money';
 import type { Agenda, Appointment, Patient, Slot } from '../lib/types';
 import { PatientSearch } from './PatientSearch';
+import {
+  BookingPaymentFields,
+  bookingPaymentPayload,
+  emptyBookingPayment,
+  validateBookingPayment,
+  type BookingPaymentValue,
+} from './BookingPaymentFields';
 import { useToast } from './toast';
 import {
   Alert,
@@ -72,7 +80,7 @@ export function AppointmentDialog({
   onSaved,
 }: AppointmentDialogProps) {
   const { user, hasPermission } = useAuth();
-  const { doctors, services, clinic } = useClinic();
+  const { doctors, services, paymentMethods, currency, clinic } = useClinic();
   const toast = useToast();
   const editing = Boolean(appointment);
 
@@ -86,6 +94,7 @@ export function AppointmentDialog({
   const [notes, setNotes] = useState('');
   const [overrideReason, setOverrideReason] = useState('');
   const [rescheduleReason, setRescheduleReason] = useState('');
+  const [payment, setPayment] = useState<BookingPaymentValue>(emptyBookingPayment);
   const [requiresOverride, setRequiresOverride] = useState(false);
   const [conflict, setConflict] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -131,6 +140,7 @@ export function AppointmentDialog({
     setNotes(defaults.notes);
     setOverrideReason('');
     setRescheduleReason('');
+    setPayment(emptyBookingPayment);
     setRequiresOverride(false);
     setConflict(null);
     setError(null);
@@ -160,6 +170,10 @@ export function AppointmentDialog({
 
   const slots: Slot[] = agendaState.data?.slots ?? [];
   const window = agendaState.data?.openingHours ?? null;
+  const selectedService = services.find((service) => service.id === serviceId) ?? null;
+  const servicePriceMinor = selectedService?.priceMinor ?? 0;
+  const billedAppointment =
+    editing && Boolean(appointment?.charge && appointment.charge.status !== 'VOID');
 
   // Offer the first usable time if the user has not chosen one yet.
   useEffect(() => {
@@ -184,6 +198,7 @@ export function AppointmentDialog({
     setServiceId(nextId);
     const service = services.find((item) => item.id === nextId);
     if (service) setDuration(service.durationMinutes);
+    setPayment(emptyBookingPayment);
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -209,6 +224,14 @@ export function AppointmentDialog({
       return;
     }
 
+    if (!editing && selectedService) {
+      const paymentError = validateBookingPayment(payment, servicePriceMinor, paymentMethods);
+      if (paymentError) {
+        setError(paymentError);
+        return;
+      }
+    }
+
     const payload = {
       doctorId,
       serviceId: serviceId || null,
@@ -225,11 +248,17 @@ export function AppointmentDialog({
 
     setBusy(true);
     try {
+      const paymentPayload =
+        !editing && selectedService
+          ? bookingPaymentPayload(payment, servicePriceMinor)
+          : undefined;
+
       const res = editing
         ? await api.patch<{ appointment: Appointment }>(`/appointments/${appointment!.id}`, payload)
         : await api.post<{ appointment: Appointment }>('/appointments', {
             ...payload,
             patientId: patient.id,
+            ...(paymentPayload ? { payment: paymentPayload } : {}),
           });
 
       toast.success(
@@ -316,7 +345,7 @@ export function AppointmentDialog({
           description={
             editing
               ? 'Moving an appointment keeps its history and notifies nobody automatically.'
-              : 'Booking does not create a charge. Bill the visit separately once the patient is seen.'
+              : 'The configured service price is recorded in Accounting. Payment is optional and defaults to pending.'
           }
           icon={editing ? CalendarSync : CalendarPlus}
         />
@@ -492,22 +521,37 @@ export function AppointmentDialog({
                 </Select>
               </Field>
 
-              <Field label="Service" htmlFor="appt-service" hint="Sets the default duration.">
+              <Field
+                label="Service"
+                htmlFor="appt-service"
+                hint={
+                  billedAppointment
+                    ? 'This appointment is already billed. Void the charge before changing the service.'
+                    : 'Sets the duration and the automatic charge amount.'
+                }
+              >
                 <Select
                   id="appt-service"
                   value={serviceId}
                   onChange={(event) => chooseService(event.target.value)}
-                  disabled={busy}
+                  disabled={busy || billedAppointment}
                 >
                   <option value="">General examination</option>
                   {services
                     .filter((service) => service.isActive)
                     .map((service) => (
                       <option key={service.id} value={service.id}>
-                        {service.name} · {service.durationMinutes} min
+                        {service.name} · {formatMoney(service.priceMinor, currency)} ·{' '}
+                        {service.durationMinutes} min
                       </option>
                     ))}
                 </Select>
+                {selectedService && (
+                  <p className="mt-1 text-[11px] font-medium text-ink-600">
+                    Price: {formatMoney(selectedService.priceMinor, currency)}
+                    {selectedService.priceMinor <= 0 && ' · no automatic charge'}
+                  </p>
+                )}
               </Field>
 
               <Field label="Date" htmlFor="appt-date" required>
@@ -572,6 +616,18 @@ export function AppointmentDialog({
                 />
               </Field>
             </section>
+
+            {!editing && selectedService && (
+              <BookingPaymentFields
+                priceMinor={servicePriceMinor}
+                currency={currency}
+                value={payment}
+                onChange={setPayment}
+                paymentMethods={paymentMethods}
+                disabled={busy}
+                idPrefix="appt-payment"
+              />
+            )}
 
             <section className="rounded-xl border border-line bg-surface-muted/50 px-3.5 py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">

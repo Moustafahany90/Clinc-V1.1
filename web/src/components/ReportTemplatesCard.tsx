@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import {
+  Archive,
   ArrowDown,
   ArrowUp,
   ChevronDown,
@@ -245,6 +246,7 @@ export function ReportTemplatesCard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<ReportTemplate | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ReportTemplate | null>(null);
   const [defaultTarget, setDefaultTarget] = useState<ReportTemplate | null>(null);
   const [blockCheck, setBlockCheck] = useState<{ ok: boolean; message: string } | null>(null);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
@@ -584,6 +586,21 @@ export function ReportTemplatesCard() {
     }
   }
 
+  async function deleteTemplate() {
+    if (!deleteTarget) return;
+    setBusy(true);
+    try {
+      await api.delete(`/reports/templates/${deleteTarget.id}/permanent`);
+      toast.success('Template deleted. Existing reports keep their pinned version.');
+      setDeleteTarget(null);
+      templatesState.reload();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function restore(template: ReportTemplate) {
     setBusy(true);
     try {
@@ -710,8 +727,9 @@ export function ReportTemplatesCard() {
                             size="sm"
                             variant="ghost"
                             onClick={() => setArchiveTarget(template)}
+                            title="Hide this template from new reports"
                           >
-                            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                            <Archive className="h-3.5 w-3.5" aria-hidden />
                             Archive
                           </Button>
                         ) : (
@@ -719,6 +737,16 @@ export function ReportTemplatesCard() {
                             Restore
                           </Button>
                         )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-clay-700 hover:bg-clay-50 hover:text-clay-800"
+                          onClick={() => setDeleteTarget(template)}
+                          title="Permanently delete this template"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                          Delete
+                        </Button>
                       </div>
                     </TD>
                   </TR>
@@ -1218,6 +1246,16 @@ export function ReportTemplatesCard() {
         confirmLabel="Archive template"
         busy={busy}
         onConfirm={() => void archive()}
+      />
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title="Delete this template permanently?"
+        description={`“${deleteTarget?.name ?? ''}” will be removed for good and cannot be restored. Reports already created keep their own pinned copy and remain printable.`}
+        confirmLabel="Delete permanently"
+        busy={busy}
+        onConfirm={() => void deleteTemplate()}
       />
     </Card>
   );

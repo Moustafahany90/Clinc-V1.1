@@ -244,6 +244,13 @@ export interface Appointment {
   service?: Pick<Service, 'id' | 'name' | 'durationMinutes' | 'priceMinor'> | null;
   queueEntry?: { id: string; status: QueueStatus; arrivedAt: string | null } | null;
   visit?: { id: string; status: VisitStatus } | null;
+  charge?: {
+    id: string;
+    amountMinor: number;
+    status: 'OPEN' | 'SETTLED' | 'VOID';
+    description: string;
+    createdAt: string;
+  } | null;
   statusHistory?: AppointmentStatusHistory[];
 }
 

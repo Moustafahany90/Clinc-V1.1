@@ -396,6 +396,45 @@ test('report templates are configurable and pinned per report', async (t) => {
     });
     assert.equal(created.status, 400, JSON.stringify(created.body));
   });
+
+  await t.test('permanently deleting a template keeps historical reports printable', async () => {
+    const created = await api('/reports/templates', {
+      method: 'POST',
+      token: adminToken,
+      body: templatePayload({ name: 'Temporary template' }),
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const temporaryId = created.body.template.id;
+
+    const visitId = await createVisit();
+    const report = await api('/reports', {
+      method: 'POST',
+      token: doctorToken,
+      body: {
+        visitId,
+        templateId: temporaryId,
+        content: { findings: 'Temporary finding', impression: 'Temporary impression' },
+      },
+    });
+    assert.equal(report.status, 201, JSON.stringify(report.body));
+    const reportId = report.body.report.id;
+
+    const deleted = await api(`/reports/templates/${temporaryId}/permanent`, {
+      method: 'DELETE',
+      token: adminToken,
+    });
+    assert.equal(deleted.status, 204, JSON.stringify(deleted.body));
+
+    const adminList = await api('/reports/templates', { token: adminToken });
+    assert.ok(!adminList.body.templates.some((template: any) => template.id === temporaryId));
+
+    const stored = await prisma.report.findUnique({ where: { id: reportId } });
+    assert.equal(stored?.templateId, null);
+
+    const print = await api(`/reports/${reportId}/print-data`, { token: doctorToken });
+    assert.equal(print.status, 200, JSON.stringify(print.body));
+    assert.equal(print.body.report.templateName, 'Temporary template');
+  });
 });
 
 test('gyn4d templates can be duplicated, edited and keep pinned print settings', async (t) => {

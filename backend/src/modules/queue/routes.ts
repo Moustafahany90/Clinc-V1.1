@@ -6,6 +6,8 @@ import { clinicDateString, dateOnlyToDb, clinicDayRange } from '../../lib/time.j
 import { dateOnlySchema, parseBody, parseParams, parseQuery, uuidSchema } from '../../lib/validate.js';
 import { authenticate, currentUser, requirePermission } from '../../middleware/auth.js';
 import { auditFromRequest } from '../../lib/audit.js';
+import { hasPermission } from '../../lib/permissions.js';
+import { bookingPaymentSchema, recordServiceRevenue } from '../payments/billing.js';
 import type { QueueStatus } from '@prisma/client';
 
 export const queueRouter = Router();
@@ -243,10 +245,19 @@ queueRouter.post(
         doctorId: uuidSchema,
         serviceId: uuidSchema.optional().nullable(),
         durationMinutes: z.number().int().min(5).max(240).optional(),
+        payment: bookingPaymentSchema,
       }),
       req,
     );
     const me = currentUser(req);
+
+    if (
+      payload.payment &&
+      payload.payment.status !== 'PENDING' &&
+      !hasPermission(me, 'PAYMENTS_WRITE')
+    ) {
+      throw forbidden('Recording a payment requires the payments permission.');
+    }
 
     const [patient, doctor] = await Promise.all([
       prisma.patient.findFirst({ where: { id: payload.patientId, isActive: true } }),
@@ -302,7 +313,19 @@ queueRouter.post(
         },
         include: queueInclude,
       });
-      return { appointment, entry };
+
+      const billing = service
+        ? await recordServiceRevenue(tx, {
+            patientId: appointment.patientId,
+            appointmentId: appointment.id,
+            visitId: null,
+            service: { id: service.id, name: service.name, priceMinor: service.priceMinor },
+            createdById: me.id,
+            payment: payload.payment,
+          })
+        : { charge: null, payment: null };
+
+      return { appointment, entry, ...billing };
     });
 
     await auditFromRequest(req, {
@@ -310,7 +333,13 @@ queueRouter.post(
       entityType: 'QueueEntry',
       entityId: result.entry.id,
       patientId: patient.id,
-      metadata: { doctorId: doctor.id },
+      metadata: {
+        doctorId: doctor.id,
+        ...(result.charge
+          ? { chargeId: result.charge.id, chargeAmountMinor: result.charge.amountMinor }
+          : {}),
+        ...(result.payment ? { paymentId: result.payment.id } : {}),
+      },
     });
 
     res.status(201).json(result);

@@ -68,6 +68,7 @@ export function PatientDetailPage() {
   const [visitOpen, setVisitOpen] = useState(false);
   const [chargeOpen, setChargeOpen] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
+  const [paymentSeedChargeId, setPaymentSeedChargeId] = useState<string | null>(null);
   const [refundTarget, setRefundTarget] = useState<{
     id: string;
     amountMinor: number;
@@ -118,6 +119,11 @@ export function PatientDetailPage() {
   const appointments = appointmentsState.data?.appointments ?? [];
   const visits = visitsState.data?.visits ?? [];
   const ledger = ledgerState.data;
+
+  function openPayment(seedChargeId: string | null = null) {
+    setPaymentSeedChargeId(seedChargeId);
+    setPaymentOpen(true);
+  }
 
   async function voidCharge(reason: string) {
     if (!voidTarget) return;
@@ -545,7 +551,7 @@ export function PatientDetailPage() {
                             <Plus className="h-3.5 w-3.5" aria-hidden />
                             Charge
                           </Button>
-                          <Button size="sm" onClick={() => setPaymentOpen(true)}>
+                          <Button size="sm" onClick={() => openPayment()}>
                             <Wallet className="h-3.5 w-3.5" aria-hidden />
                             Payment
                           </Button>
@@ -593,18 +599,32 @@ export function PatientDetailPage() {
                                 <StatusBadge status={charge.status} />
                               </TD>
                               <TD className="text-right">
-                                {hasPermission('PAYMENTS_WRITE') &&
-                                  charge.status === 'OPEN' &&
-                                  charge.allocatedMinor === 0 && (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => setVoidTarget(charge)}
-                                    >
-                                      <XCircle className="h-3.5 w-3.5" aria-hidden />
-                                      Void
-                                    </Button>
-                                  )}
+                                <div className="flex flex-wrap items-center justify-end gap-1">
+                                  {hasPermission('PAYMENTS_WRITE') &&
+                                    charge.status === 'OPEN' &&
+                                    charge.balanceMinor > 0 && (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => openPayment(charge.id)}
+                                      >
+                                        <Wallet className="h-3.5 w-3.5" aria-hidden />
+                                        Collect
+                                      </Button>
+                                    )}
+                                  {hasPermission('PAYMENTS_WRITE') &&
+                                    charge.status === 'OPEN' &&
+                                    charge.allocatedMinor === 0 && (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => setVoidTarget(charge)}
+                                      >
+                                        <XCircle className="h-3.5 w-3.5" aria-hidden />
+                                        Void
+                                      </Button>
+                                    )}
+                                </div>
                               </TD>
                             </TR>
                           ))}
@@ -794,8 +814,12 @@ export function PatientDetailPage() {
           />
           <PaymentDialog
             open={paymentOpen}
-            onOpenChange={setPaymentOpen}
+            onOpenChange={(next) => {
+              setPaymentOpen(next);
+              if (!next) setPaymentSeedChargeId(null);
+            }}
             patient={patient}
+            seedChargeId={paymentSeedChargeId ?? undefined}
             onSaved={() => ledgerState.reload()}
           />
           <RefundDialog

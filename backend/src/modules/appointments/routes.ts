@@ -22,6 +22,7 @@ import {
   resolveSchedule,
 } from './service.js';
 import { syncQueueForStatus } from '../queue/service.js';
+import { bookingPaymentSchema, recordServiceRevenue } from '../payments/billing.js';
 import { getClinicSettings } from '../../lib/clinic.js';
 import type { AppointmentStatus } from '@prisma/client';
 
@@ -36,6 +37,9 @@ const appointmentInclude = {
   service: { select: { id: true, name: true, durationMinutes: true, priceMinor: true } },
   queueEntry: { select: { id: true, status: true, arrivedAt: true } },
   visit: { select: { id: true, status: true } },
+  charge: {
+    select: { id: true, amountMinor: true, status: true, description: true, createdAt: true },
+  },
 } as const;
 
 /** A doctor may only ever see / touch their own calendar. */
@@ -168,6 +172,7 @@ const createSchema = z.object({
   reason: z.string().trim().max(500).optional().or(z.literal('')),
   notes: z.string().trim().max(2000).optional().or(z.literal('')),
   overrideReason: z.string().trim().max(300).optional().or(z.literal('')),
+  payment: bookingPaymentSchema,
 });
 
 appointmentsRouter.post(
@@ -177,6 +182,14 @@ appointmentsRouter.post(
     const me = currentUser(req);
     const payload = parseBody(createSchema, req);
     const settings = await getClinicSettings();
+
+    if (
+      payload.payment &&
+      payload.payment.status !== 'PENDING' &&
+      !hasPermission(me, 'PAYMENTS_WRITE')
+    ) {
+      throw forbidden('Recording a payment requires the payments permission.');
+    }
 
     const [patient, doctor, service] = await Promise.all([
       prisma.patient.findFirst({ where: { id: payload.patientId, isActive: true } }),
@@ -224,7 +237,7 @@ appointmentsRouter.post(
       }
     }
 
-    const appointment = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       await lockDoctorCalendar(tx, doctor.id);
 
       const overlap = await findOverlap(tx, doctor.id, startAt, endAt);
@@ -263,24 +276,39 @@ appointmentsRouter.post(
         },
       });
 
-      return created;
+      const billing = service
+        ? await recordServiceRevenue(tx, {
+            patientId: created.patientId,
+            appointmentId: created.id,
+            visitId: created.visit?.id ?? null,
+            service: { id: service.id, name: service.name, priceMinor: service.priceMinor },
+            createdById: me.id,
+            payment: payload.payment,
+          })
+        : { charge: null, payment: null };
+
+      return { appointment: created, ...billing };
     });
 
     await auditFromRequest(req, {
       action: 'appointment.created',
       entityType: 'Appointment',
-      entityId: appointment.id,
-      patientId: appointment.patientId,
+      entityId: result.appointment.id,
+      patientId: result.appointment.patientId,
       metadata: {
-        doctorId: appointment.doctorId,
-        startAt: appointment.startAt.toISOString(),
+        doctorId: result.appointment.doctorId,
+        startAt: result.appointment.startAt.toISOString(),
         durationMinutes,
         manualOverride: !within.ok,
         ...(!within.ok ? { overrideReason: payload.overrideReason ?? null } : {}),
+        ...(result.charge
+          ? { chargeId: result.charge.id, chargeAmountMinor: result.charge.amountMinor }
+          : {}),
+        ...(result.payment ? { paymentId: result.payment.id } : {}),
       },
     });
 
-    res.status(201).json({ appointment });
+    res.status(201).json(result);
   }),
 );
 
@@ -329,7 +357,10 @@ appointmentsRouter.patch(
     const me = currentUser(req);
     const settings = await getClinicSettings();
 
-    const existing = await prisma.appointment.findUnique({ where: { id } });
+    const existing = await prisma.appointment.findUnique({
+      where: { id },
+      include: { charge: { select: { id: true, status: true } } },
+    });
     if (!existing) throw notFound('Appointment not found');
     if (['DONE', 'CANCELLED', 'NO_SHOW'].includes(existing.status)) {
       throw badRequest('Completed or cancelled appointments cannot be rescheduled.');
@@ -346,6 +377,18 @@ appointmentsRouter.patch(
     const serviceId = payload.serviceId === undefined ? existing.serviceId : payload.serviceId;
     const service = serviceId ? await prisma.service.findUnique({ where: { id: serviceId } }) : null;
     if (serviceId && !service) throw badRequest('Select a valid service.');
+
+    // A billed appointment is immutable for doctor/service attribution. Any
+    // change requires an explicit void and re-bill so historical revenue and
+    // doctor attribution are never silently rewritten.
+    const changesBilledAttribution =
+      (payload.serviceId !== undefined && payload.serviceId !== existing.serviceId) ||
+      (payload.doctorId !== undefined && payload.doctorId !== existing.doctorId);
+    if (changesBilledAttribution && existing.charge && existing.charge.status !== 'VOID') {
+      throw conflict(
+        'This appointment has already been billed. Void the charge and re-bill before changing the doctor or service.',
+      );
+    }
 
     const dateOnly = payload.date ?? clinicDateString(existing.startAt);
     const startMinute = payload.startMinute ?? clinicMinutesOfDay(existing.startAt);

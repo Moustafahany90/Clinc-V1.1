@@ -469,6 +469,37 @@ reportsRouter.patch(
   }),
 );
 
+/**
+ * Permanently remove a template. Historical reports keep their own
+ * `templateSnapshot`, so their content and printout stay intact; only the
+ * `templateId` reference is cleared (onDelete: SetNull).
+ */
+reportsRouter.delete(
+  '/templates/:id/permanent',
+  requirePermission('SETTINGS_MANAGE'),
+  asyncHandler(async (req, res) => {
+    const { id } = parseParams(z.object({ id: uuidSchema }), req);
+    const existing = await prisma.reportTemplate.findUnique({
+      where: { id },
+      include: { _count: { select: { reports: true } } },
+    });
+    if (!existing) throw notFound('Template not found');
+
+    await prisma.reportTemplate.delete({ where: { id } });
+    await auditFromRequest(req, {
+      action: 'report_template.deleted',
+      entityType: 'ReportTemplate',
+      entityId: id,
+      metadata: {
+        name: existing.name,
+        reportCount: existing._count.reports,
+        isDefault: existing.isDefault,
+      },
+    });
+    res.status(204).end();
+  }),
+);
+
 /** Archive rather than delete so historical reports keep a resolvable reference. */
 reportsRouter.delete(
   '/templates/:id',
