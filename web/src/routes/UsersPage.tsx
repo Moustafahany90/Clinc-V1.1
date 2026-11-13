@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   KeyRound,
-  Mail,
-  MailWarning,
   ShieldCheck,
   ShieldPlus,
   UserPlus,
@@ -62,8 +60,7 @@ interface UserList {
 }
 
 interface InviteOutcome {
-  emailed: boolean;
-  url?: string;
+  url: string;
 }
 
 const ROLE_HINTS: Record<Role, string> = {
@@ -129,19 +126,11 @@ export function UsersPage() {
     if (!resetTarget) return;
     setBusy(true);
     try {
-      const res = await api.post<{
-        emailed: boolean;
-        emailConfigured: boolean;
-        url?: string;
-      }>(`/users/${resetTarget.id}/password-reset`);
-      if (res.data.url) {
-        setInviteLink({
-          title: `Password link for ${resetTarget.firstName} ${resetTarget.lastName}`,
-          url: res.data.url,
-        });
-      } else {
-        toast.success('Password link emailed', resetTarget.email);
-      }
+      const res = await api.post<{ url: string }>(`/users/${resetTarget.id}/password-reset`);
+      setInviteLink({
+        title: `Password link for ${resetTarget.firstName} ${resetTarget.lastName}`,
+        url: res.data.url,
+      });
       setResetTarget(null);
     } catch (err) {
       toast.error('Could not create a password link', errorMessage(err));
@@ -507,7 +496,6 @@ function CreateUserDialog({
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<Role>('RECEPTIONIST');
   const [permissions, setPermissions] = useState<string[]>(ROLE_DEFAULT_PERMISSIONS.RECEPTIONIST);
-  const [sendInvite, setSendInvite] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -519,7 +507,6 @@ function CreateUserDialog({
     setPhone('');
     setRole('RECEPTIONIST');
     setPermissions(ROLE_DEFAULT_PERMISSIONS.RECEPTIONIST);
-    setSendInvite(true);
     setError(null);
   }, [open]);
 
@@ -536,7 +523,6 @@ function CreateUserDialog({
       const res = await api.post<{
         user: UserAccount;
         invite: InviteOutcome | null;
-        emailConfigured: boolean;
       }>('/users', {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
@@ -544,7 +530,6 @@ function CreateUserDialog({
         ...(phone.trim() ? { phone: phone.trim() } : {}),
         role,
         permissions,
-        sendInvite,
       });
       toast.success('Account created', `${res.data.user.firstName} ${res.data.user.lastName}`);
       onCreated(res.data.invite);
@@ -611,15 +596,6 @@ function CreateUserDialog({
             <div>
               <p className="mb-2 text-[13px] font-medium text-ink-700">Permissions</p>
               <PermissionPicker role={role} value={permissions} onChange={setPermissions} />
-            </div>
-
-            <div className="rounded-xl border border-line p-3">
-              <Switch
-                checked={sendInvite}
-                onCheckedChange={setSendInvite}
-                label="Send the invite by email"
-                description="If email is not configured, a one-time link is shown so you can share it manually."
-              />
             </div>
           </DialogBody>
           <DialogFooter>

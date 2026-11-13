@@ -147,7 +147,6 @@ before(async () => {
       email: 'templates.doctor@clinic.test',
       role: 'DOCTOR',
       password: 'Str0ng!Passw0rd',
-      sendInvite: false,
     },
   });
   assert.equal(doctor.status, 201, JSON.stringify(doctor.body));

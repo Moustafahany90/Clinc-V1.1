@@ -35,42 +35,12 @@ const schema = z.object({
   UPLOAD_DIR: z.string().default('./storage/uploads'),
   MAX_UPLOAD_MB: int(25, 1, 200),
 
-  EMAIL_ENABLED: bool(false),
-  EMAIL_PROVIDER: z.enum(['smtp', 'graph']).default('smtp'),
-  SMTP_HOST: z.string().optional().default(''),
-  SMTP_PORT: int(587, 1, 65535),
-  SMTP_SECURE: bool(false),
-  SMTP_USER: z.string().optional().default(''),
-  SMTP_PASSWORD: z.string().optional().default(''),
-  MAIL_FROM: z.string().default('Ultrasound Clinic <no-reply@example.com>'),
-  GRAPH_TENANT_ID: z.string().optional().default(''),
-  GRAPH_CLIENT_ID: z.string().optional().default(''),
-  GRAPH_CLIENT_SECRET: z.string().optional().default(''),
-  GRAPH_SENDER: z.string().optional().default(''),
-
   EVOLUTION_API_ENABLED: bool(false),
   EVOLUTION_API_URL: z.string().default(''),
   EVOLUTION_API_KEY: z.string().optional().default(''),
   EVOLUTION_INSTANCE_NAME: z.string().default('ultrasound_clinic'),
   EVOLUTION_API_TIMEOUT_MS: int(30_000, 2_000, 120_000),
   EVOLUTION_DEFAULT_COUNTRY_CODE: z
-    .string()
-    .regex(/^\d{1,4}$/, 'Must be a country calling code without +.')
-    .default('20'),
-
-  // Retained for backward compatibility during migration
-  WHATSAPP_ENABLED: bool(false),
-  WHATSAPP_GRAPH_BASE_URL: z.string().url().default('https://graph.facebook.com'),
-  WHATSAPP_API_VERSION: z.string().regex(/^v\d+\.\d+$/, 'Must look like v23.0.').default('v23.0'),
-  WHATSAPP_PHONE_NUMBER_ID: z.string().optional().default(''),
-  WHATSAPP_ACCESS_TOKEN: z.string().optional().default(''),
-  WHATSAPP_TEMPLATE_NAME: z
-    .string()
-    .regex(/^[a-z0-9_]*$/, 'Use the lowercase approved template name, or leave blank.')
-    .default(''),
-  WHATSAPP_TEMPLATE_LANGUAGE: z.string().default('en_US'),
-  WHATSAPP_TIMEOUT_MS: int(30_000, 5_000, 120_000),
-  WHATSAPP_DEFAULT_COUNTRY_CODE: z
     .string()
     .regex(/^\d{1,4}$/, 'Must be a country calling code without +.')
     .default('20'),
@@ -111,23 +81,6 @@ const refined = schema.superRefine((raw, ctx) => {
         code: z.ZodIssueCode.custom,
         path: ['EVOLUTION_INSTANCE_NAME'],
         message: 'Evolution API is enabled but EVOLUTION_INSTANCE_NAME is missing.',
-      });
-    }
-  }
-
-  if (raw.WHATSAPP_ENABLED) {
-    if (!raw.WHATSAPP_ACCESS_TOKEN || !raw.WHATSAPP_PHONE_NUMBER_ID) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['WHATSAPP_ENABLED'],
-        message: 'WhatsApp is enabled but WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID is missing.',
-      });
-    }
-    if (!raw.WHATSAPP_GRAPH_BASE_URL.startsWith('https://')) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['WHATSAPP_GRAPH_BASE_URL'],
-        message: 'WhatsApp Graph API requests must use HTTPS.',
       });
     }
   }
@@ -187,31 +140,6 @@ const refined = schema.superRefine((raw, ctx) => {
       path: ['EVOLUTION_API_KEY'],
       message: 'Replace the placeholder Evolution API key before production.',
     });
-  }
-  if (raw.WHATSAPP_ENABLED && placeholder.test(raw.WHATSAPP_ACCESS_TOKEN)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['WHATSAPP_ACCESS_TOKEN'],
-      message: 'Replace the placeholder WhatsApp token before production.',
-    });
-  }
-  if (raw.EMAIL_ENABLED) {
-    const configured =
-      raw.EMAIL_PROVIDER === 'smtp'
-        ? Boolean(raw.SMTP_HOST)
-        : Boolean(
-            raw.GRAPH_TENANT_ID &&
-              raw.GRAPH_CLIENT_ID &&
-              raw.GRAPH_CLIENT_SECRET &&
-              raw.GRAPH_SENDER,
-          );
-    if (!configured) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['EMAIL_ENABLED'],
-        message: 'Email is enabled but its provider is not fully configured.',
-      });
-    }
   }
 });
 

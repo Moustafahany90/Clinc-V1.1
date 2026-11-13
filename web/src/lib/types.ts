@@ -168,11 +168,6 @@ export interface Clinic {
   currency: string;
   defaultAppointmentMinutes: number;
   slotIntervalMinutes: number;
-  emailEnabled: boolean;
-  emailProvider: 'smtp' | 'graph';
-  emailFromAddress: string | null;
-  dailyDoctorDigest: boolean;
-  digestSendHour: number;
   setupCompletedAt: string | null;
 }
 

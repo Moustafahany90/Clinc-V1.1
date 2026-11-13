@@ -5,8 +5,6 @@ import {
   Circle,
   Clock,
   CreditCard,
-  FlaskConical,
-  Mail,
   MessageSquare,
   Plus,
   QrCode,
@@ -101,15 +99,12 @@ const TIMEZONES = [
 
 interface SettingsResponse {
   clinic: Clinic;
-  emailConfigured: boolean;
-  emailWarning: string | null;
   serverTimezone: string;
 }
 
 interface GettingStarted {
   items: { key: string; label: string; done: boolean; optional?: boolean }[];
   completed: boolean;
-  emailConfigured: boolean;
 }
 
 export function SettingsPage() {
@@ -149,7 +144,6 @@ export function SettingsPage() {
           <TabsTrigger value="services">Services</TabsTrigger>
           <TabsTrigger value="templates">Report templates</TabsTrigger>
           <TabsTrigger value="finance">Payments & categories</TabsTrigger>
-          <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="setup">Getting started</TabsTrigger>
         </TabsList>
@@ -178,15 +172,6 @@ export function SettingsPage() {
         <TabsContent value="finance" className="space-y-4">
           <PaymentMethodsCard />
           <ExpenseCategoriesCard />
-        </TabsContent>
-
-        <TabsContent value="email" className="space-y-4">
-          {settingsState.error && <Alert tone="danger">{settingsState.error}</Alert>}
-          {settingsState.loading && !settings ? (
-            <LoadingBlock label="Loading email settings…" />
-          ) : settings ? (
-            <EmailCard settings={settings} onSaved={refreshSettings} />
-          ) : null}
         </TabsContent>
 
         <TabsContent value="whatsapp" className="space-y-4">
@@ -1453,191 +1438,6 @@ function ExpenseCategoriesCard() {
         </div>
       )}
     </Card>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Email                                                                      */
-/* -------------------------------------------------------------------------- */
-
-function EmailCard({
-  settings,
-  onSaved,
-}: {
-  settings: SettingsResponse;
-  onSaved: () => void;
-}) {
-  const toast = useToast();
-  const [form, setForm] = useState(settings.clinic);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [testTo, setTestTo] = useState('');
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ sent: boolean; reason: string | null } | null>(null);
-
-  useEffect(() => {
-    setForm(settings.clinic);
-  }, [settings]);
-
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    setError(null);
-    setBusy(true);
-    try {
-      await api.patch('/settings', {
-        emailEnabled: form.emailEnabled,
-        emailProvider: form.emailProvider,
-        emailFromAddress: form.emailFromAddress?.trim() || null,
-        dailyDoctorDigest: form.dailyDoctorDigest,
-        digestSendHour: form.digestSendHour,
-      });
-      toast.success('Email settings saved');
-      onSaved();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function test() {
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const res = await api.post<{ sent: boolean; reason: string | null; configured: boolean }>(
-        '/settings/test-email',
-        testTo.trim() ? { to: testTo.trim() } : {},
-      );
-      setTestResult({ sent: res.data.sent, reason: res.data.reason });
-      if (res.data.sent) toast.success('Test email sent');
-      else toast.info('Email was not sent', res.data.reason ?? 'Email delivery is not configured.');
-    } catch (err) {
-      toast.error('Could not send the test email', errorMessage(err));
-    } finally {
-      setTesting(false);
-    }
-  }
-
-  return (
-    <div className="space-y-4">
-      {!settings.emailConfigured && (
-        <Alert tone="warning" title="Email delivery is not configured">
-          Invitations and password links still work: the system shows a one-time link that you can
-          share manually. All other clinic operations are unaffected. Configure SMTP or Microsoft
-          Graph credentials on the server to enable email.
-        </Alert>
-      )}
-      {settings.emailWarning && (
-        <Alert tone="warning">{settings.emailWarning}</Alert>
-      )}
-
-      <Card>
-        <CardHeader
-          title="Email delivery"
-          description="Optional. Used for staff invitations, password links and the daily doctor digest."
-          icon={Mail}
-        />
-        <form onSubmit={save} className="space-y-4 px-5 py-4">
-          {error && <Alert tone="danger">{error}</Alert>}
-          <div className="rounded-xl border border-line p-3">
-            <Switch
-              checked={form.emailEnabled}
-              onCheckedChange={(checked) =>
-                setForm((prev) => ({ ...prev, emailEnabled: checked }))
-              }
-              label="Enable email"
-              description="When disabled, the clinic never attempts to send email."
-            />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Provider">
-              <Select
-                value={form.emailProvider}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    emailProvider: event.target.value as Clinic['emailProvider'],
-                  }))
-                }
-              >
-                <option value="smtp">SMTP</option>
-                <option value="graph">Microsoft Graph</option>
-              </Select>
-            </Field>
-            <Field label="From address" hint="The verified sender used on outgoing messages.">
-              <Input
-                type="email"
-                value={form.emailFromAddress ?? ''}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, emailFromAddress: event.target.value }))
-                }
-              />
-            </Field>
-          </div>
-          <div className="grid gap-4 rounded-xl border border-line p-3 sm:grid-cols-[1fr_auto] sm:items-center">
-            <Switch
-              checked={form.dailyDoctorDigest}
-              onCheckedChange={(checked) =>
-                setForm((prev) => ({ ...prev, dailyDoctorDigest: checked }))
-              }
-              label="Daily doctor digest"
-              description="Send each doctor a summary of their appointments for the day."
-            />
-            <Field label="Send hour" className="w-32">
-              <Select
-                value={form.digestSendHour}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, digestSendHour: Number(event.target.value) }))
-                }
-              >
-                {Array.from({ length: 24 }, (_, hour) => (
-                  <option key={hour} value={hour}>
-                    {String(hour).padStart(2, '0')}:00
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-          <div className="flex justify-end border-t border-line pt-4">
-            <Button type="submit" loading={busy}>
-              <Save className="h-4 w-4" aria-hidden />
-              Save email settings
-            </Button>
-          </div>
-        </form>
-      </Card>
-
-      <Card>
-        <CardHeader
-          title="Send a test message"
-          description="Confirms the server can reach the mail provider. It does not change any setting."
-          icon={FlaskConical}
-        />
-        <div className="space-y-3 px-5 py-4">
-          <div className="flex flex-wrap items-end gap-2">
-            <Field label="Send to" className="min-w-[14rem] flex-1" hint="Leave blank to email yourself.">
-              <Input
-                type="email"
-                value={testTo}
-                onChange={(event) => setTestTo(event.target.value)}
-                placeholder="you@clinic.example"
-              />
-            </Field>
-            <Button variant="secondary" loading={testing} onClick={() => void test()}>
-              <Mail className="h-4 w-4" aria-hidden />
-              Send test email
-            </Button>
-          </div>
-          {testResult && (
-            <Alert tone={testResult.sent ? 'success' : 'warning'}>
-              {testResult.sent
-                ? 'The test message was accepted by the mail provider.'
-                : testResult.reason ?? 'The message was not sent. Check the server email configuration.'}
-            </Alert>
-          )}
-        </div>
-      </Card>
-    </div>
   );
 }
 

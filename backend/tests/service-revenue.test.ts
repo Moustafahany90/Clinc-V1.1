@@ -186,7 +186,6 @@ before(async () => {
       email: 'revenue.doctor@clinic.test',
       role: 'DOCTOR',
       password: 'Str0ng!Passw0rd',
-      sendInvite: false,
     },
   });
   assert.equal(doctor.status, 201, JSON.stringify(doctor.body));
@@ -201,7 +200,6 @@ before(async () => {
       email: 'other.doctor@clinic.test',
       role: 'DOCTOR',
       password: 'Str0ng!Passw0rd',
-      sendInvite: false,
     },
   });
   assert.equal(otherDoctor.status, 201, JSON.stringify(otherDoctor.body));

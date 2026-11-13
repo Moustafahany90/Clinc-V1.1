@@ -41,23 +41,20 @@ clean as evidence that the old values are safe.
    ```
    Set `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET`, then restart the backend.
    All existing sessions are invalidated. Never reuse one value for both.
-5. **Email/Graph credentials** — revoke the old SMTP password or Microsoft
-   Graph client secret in the provider console, issue a new one, update `.env`,
-   restart the backend, and send a test message.
-6. **WhatsApp credentials** — revoke the exposed Meta system-user token or
-   phone-number configuration in Meta Business Manager, issue a new token,
-   update `.env`, restart the backend, and verify a synthetic delivery. Rotate
-   the token immediately if it was ever pasted into a screenshot, chat or log;
-   never reuse a token from another clinic or project.
-7. **TLS** — revoke/reissue any exposed certificate or private key. Caddy
+5. **WhatsApp credentials** — revoke the exposed Evolution API key, issue a
+   new one, set `EVOLUTION_API_KEY` to the same value used by the `evolution`
+   service, restart the backend, and verify a synthetic delivery. Rotate the
+   key immediately if it was ever pasted into a screenshot, chat or log; never
+   reuse a key from another clinic or project.
+6. **TLS** — revoke/reissue any exposed certificate or private key. Caddy
    manages certificates automatically when used with the TLS overlay.
-8. **Backups and storage** — if a backup or the storage volume was exposed,
+7. **Backups and storage** — if a backup or the storage volume was exposed,
    treat all PHI in it as disclosed and follow the clinic's incident process.
    Re-encrypt new backups and restrict access to the backup directory.
-9. **Git history** — do not rewrite or force-push shared history without the
+8. **Git history** — do not rewrite or force-push shared history without the
    repository owner's explicit approval. Rotate the secret instead; optionally
    run a secret scanner (for example `gitleaks detect`) and record findings.
-10. **Verify** — sign in with a fresh account, confirm old access tokens return
+9. **Verify** — sign in with a fresh account, confirm old access tokens return
    `401`, confirm `GET /healthz` is `200`, and check the audit log for
    `auth.password_changed` / `user.removed` events.
 
@@ -70,10 +67,8 @@ clean as evidence that the old values are safe.
 - Distinct, random JWT secrets of at least 32 characters, not placeholders
 - Database, web, and backend ports bound to localhost; only the TLS proxy is
   exposed
-- `EMAIL_ENABLED=true` only with a fully configured provider
-- `WHATSAPP_ENABLED=true` only with a dedicated token, phone-number id, HTTPS
-  Graph endpoint, patient-consent process and an approved template for
-  business-initiated messages
+- `EVOLUTION_API_ENABLED=true` only with a dedicated API key, a private
+  Evolution API URL, patient-consent process and a paired WhatsApp session
 
 The backend exits at startup if any of these production checks fail.
 

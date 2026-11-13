@@ -11,7 +11,6 @@ import { requirePermission } from '../../middleware/auth.js';
 import { setupLimiter } from '../../middleware/rateLimit.js';
 import { ensureDefaults } from '../../lib/defaults.js';
 import { getClinicSettings, isSetupRequired } from '../../lib/clinic.js';
-import { emailConfigured } from '../../lib/email.js';
 import { auditFromRequest } from '../../lib/audit.js';
 
 export const setupRouter = Router();
@@ -36,7 +35,6 @@ setupRouter.get(
     res.json({
       setupRequired: required,
       hasAnyUser: userCount > 0,
-      emailConfigured: emailConfigured(),
       clinic: {
         name: settings.name,
         timezone: settings.timezone,
