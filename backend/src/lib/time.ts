@@ -88,6 +88,42 @@ export function isoWeekday(dateOnly: string): number {
   return day === 0 ? 7 : day;
 }
 
+/**
+ * First day of the clinic week as an ISO weekday (Monday = 1 ... Sunday = 7).
+ * The clinic week runs Saturday -> Friday.
+ */
+export const CLINIC_WEEK_START_ISO = 6;
+
+/** Add whole calendar days to a YYYY-MM-DD string. */
+export function addDaysDateOnly(dateOnly: string, days: number): string {
+  if (!isValidDateOnly(dateOnly)) throw new Error(`Invalid date: ${dateOnly}`);
+  const date = new Date(`${dateOnly}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Saturday that begins the clinic week containing `dateOnly`. */
+export function clinicWeekStart(dateOnly: string): string {
+  if (!isValidDateOnly(dateOnly)) throw new Error(`Invalid date: ${dateOnly}`);
+  const offset = (isoWeekday(dateOnly) - CLINIC_WEEK_START_ISO + 7) % 7;
+  return addDaysDateOnly(dateOnly, -offset);
+}
+
+/**
+ * The seven clinic-local dates of the week containing `dateOnly`, starting on
+ * Saturday. Calendar arithmetic is date-only, so DST transitions inside the
+ * week never change the boundaries.
+ */
+export function clinicWeekRange(dateOnly: string): {
+  start: string;
+  end: string;
+  dates: string[];
+} {
+  const start = clinicWeekStart(dateOnly);
+  const dates = Array.from({ length: 7 }, (_, index) => addDaysDateOnly(start, index));
+  return { start, end: dates[dates.length - 1]!, dates };
+}
+
 /** Minutes from midnight for an instant, in clinic-local time. */
 export function clinicMinutesOfDay(instant: Date): number {
   const local = toZonedTime(instant, clinicTimezone);
