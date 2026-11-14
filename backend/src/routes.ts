@@ -16,6 +16,7 @@ import { financialRouter } from './modules/financial/routes.js';
 import { settingsRouter } from './modules/settings/routes.js';
 import { dashboardRouter } from './modules/dashboard/routes.js';
 import { quickActionsRouter } from './modules/quick-actions/routes.js';
+import { financialQuickActionsRouter } from './modules/quick-actions/financial.routes.js';
 import { auditRouter } from './modules/audit/routes.js';
 
 export const apiRouter = Router();
@@ -82,4 +83,5 @@ apiRouter.use('/financial-reports', financialRouter);
 apiRouter.use('/settings', settingsRouter);
 apiRouter.use('/dashboard', dashboardRouter);
 apiRouter.use('/quick-actions', quickActionsRouter);
+apiRouter.use('/quick-actions', financialQuickActionsRouter);
 apiRouter.use('/audit', auditRouter);

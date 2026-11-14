@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { asyncHandler, badRequest } from '../../lib/errors.js';
+import { getDailyStats } from './service.js';
 import { dateOnlySchema, parseQuery } from '../../lib/validate.js';
 import { authenticate, requirePermission } from '../../middleware/auth.js';
 import {
@@ -47,87 +48,13 @@ async function allTimePosition() {
   };
 }
 
-async function dailyFigures(dateOnly: string) {
-  const { start, end } = clinicDayRange(dateOnly);
-  const dbDate = dateOnlyToDb(dateOnly);
-
-  const [charges, payments, refunds, expenses, methods] = await Promise.all([
-    prisma.charge.findMany({
-      where: { status: { not: 'VOID' }, createdAt: { gte: start, lt: end } },
-      select: { amountMinor: true },
-    }),
-    prisma.payment.findMany({
-      where: { status: 'COMPLETED', receivedAt: { gte: start, lt: end } },
-      select: { amountMinor: true, methodKey: true },
-    }),
-    prisma.refund.findMany({
-      where: { refundedAt: { gte: start, lt: end } },
-      select: { amountMinor: true, payment: { select: { methodKey: true } } },
-    }),
-    prisma.expense.findMany({
-      where: { expenseDate: dbDate, status: 'RECORDED' },
-      select: { amountMinor: true, category: { select: { name: true } } },
-    }),
-    prisma.paymentMethod.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } }),
-  ]);
-
-  const chargesMinor = charges.reduce((s, c) => s + c.amountMinor, 0);
-  const paymentsMinor = payments.reduce((s, p) => s + p.amountMinor, 0);
-  const refundsMinor = refunds.reduce((s, r) => s + r.amountMinor, 0);
-  const expensesMinor = expenses.reduce((s, e) => s + e.amountMinor, 0);
-
-  const byMethod = methods.map((method) => {
-    const paid = payments
-      .filter((p) => p.methodKey === method.key)
-      .reduce((s, p) => s + p.amountMinor, 0);
-    const refunded = refunds
-      .filter((r) => r.payment.methodKey === method.key)
-      .reduce((s, r) => s + r.amountMinor, 0);
-    return {
-      key: method.key,
-      label: method.label,
-      paymentsCount: payments.filter((p) => p.methodKey === method.key).length,
-      paymentsMinor: paid,
-      refundsMinor: refunded,
-      netMinor: paid - refunded,
-    };
-  });
-
-  const byCategory = new Map<string, number>();
-  for (const expense of expenses) {
-    byCategory.set(
-      expense.category.name,
-      (byCategory.get(expense.category.name) ?? 0) + expense.amountMinor,
-    );
-  }
-
-  return {
-    date: dateOnly,
-    currency: CLINIC_CURRENCY,
-    charges: { count: charges.length, totalMinor: chargesMinor },
-    payments: { count: payments.length, totalMinor: paymentsMinor },
-    refunds: { count: refunds.length, totalMinor: refundsMinor },
-    expenses: {
-      count: expenses.length,
-      totalMinor: expensesMinor,
-      byCategory: [...byCategory.entries()].map(([name, totalMinor]) => ({ name, totalMinor })),
-    },
-    byMethod,
-    totals: {
-      collectedMinor: paymentsMinor - refundsMinor,
-      netCashMinor: paymentsMinor - refundsMinor - expensesMinor,
-      billedMinor: chargesMinor,
-    },
-  };
-}
-
 financialRouter.get(
   '/daily',
   requirePermission('FINANCE_READ'),
   asyncHandler(async (req, res) => {
     const query = parseQuery(z.object({ date: dateOnlySchema.optional() }), req);
     const dateOnly = query.date ?? clinicDateString();
-    const [figures, position] = await Promise.all([dailyFigures(dateOnly), allTimePosition()]);
+    const [figures, position] = await Promise.all([getDailyStats(dateOnly), allTimePosition()]);
     res.json({ ...figures, position });
   }),
 );
