@@ -1,8 +1,15 @@
-import type { AppointmentStatus, Prisma } from '@prisma/client';
+import type {
+  AppointmentStatus,
+  DoctorAvailability,
+  Prisma,
+  ScheduleException,
+  WorkingHours,
+} from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import {
   clinicDateString,
   clinicDayRange,
+  clinicLocalToUtc,
   clinicMinutesOfDay,
   dateOnlyToDb,
   isoWeekday,
@@ -137,27 +144,22 @@ function combineWindows(
   };
 }
 
-export async function resolveSchedule(
-  doctorId: string,
-  dateOnly: string,
-): Promise<ScheduleWindow> {
-  const weekday = isoWeekday(dateOnly);
-  const dbDate = dateOnlyToDb(dateOnly);
+/** Everything `resolveScheduleFromRows` needs for one doctor/day. */
+export interface ScheduleRows {
+  weekday: number;
+  doctorException: ScheduleException | null;
+  clinicException: ScheduleException | null;
+  doctorHours: DoctorAvailability | null;
+  clinicHours: WorkingHours | null;
+}
 
-  const [doctorException, clinicException, doctorHours, clinicHours] = await Promise.all([
-    prisma.scheduleException.findFirst({
-      where: { doctorId, date: dbDate },
-      orderBy: { createdAt: 'desc' },
-    }),
-    prisma.scheduleException.findFirst({
-      where: { doctorId: null, date: dbDate },
-      orderBy: { createdAt: 'desc' },
-    }),
-    prisma.doctorAvailability.findUnique({
-      where: { doctorId_dayOfWeek: { doctorId, dayOfWeek: weekday } },
-    }),
-    prisma.workingHours.findUnique({ where: { dayOfWeek: weekday } }),
-  ]);
+/**
+ * Pure schedule decision. `resolveSchedule` (single day) and
+ * `buildSlotsForDates` (ranges) both funnel through this function so the
+ * precedence rules only exist in one place.
+ */
+export function resolveScheduleFromRows(rows: ScheduleRows): ScheduleWindow {
+  const { doctorException, clinicException, doctorHours, clinicHours } = rows;
 
   const clinicBreak =
     clinicHours?.breakStartMinute != null && clinicHours.breakEndMinute != null
@@ -223,6 +225,84 @@ export async function resolveSchedule(
   );
 }
 
+export async function resolveSchedule(
+  doctorId: string,
+  dateOnly: string,
+): Promise<ScheduleWindow> {
+  const weekday = isoWeekday(dateOnly);
+  const dbDate = dateOnlyToDb(dateOnly);
+
+  const [doctorException, clinicException, doctorHours, clinicHours] = await Promise.all([
+    prisma.scheduleException.findFirst({
+      where: { doctorId, date: dbDate },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.scheduleException.findFirst({
+      where: { doctorId: null, date: dbDate },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.doctorAvailability.findUnique({
+      where: { doctorId_dayOfWeek: { doctorId, dayOfWeek: weekday } },
+    }),
+    prisma.workingHours.findUnique({ where: { dayOfWeek: weekday } }),
+  ]);
+
+  return resolveScheduleFromRows({
+    weekday,
+    doctorException,
+    clinicException,
+    doctorHours,
+    clinicHours,
+  });
+}
+
+/**
+ * Bulk schedule lookup for a range of days with one query per source instead
+ * of one per day. Feeds `buildSlotsForDates`.
+ */
+export async function resolveScheduleForDates(
+  doctorId: string,
+  dates: string[],
+): Promise<Map<string, ScheduleWindow>> {
+  if (dates.length === 0) return new Map();
+  const rows = await loadScheduleRows(doctorId, dates);
+  return new Map(dates.map((date) => [date, resolveScheduleFromRows(rows.get(date)!)]));
+}
+
+async function loadScheduleRows(
+  doctorId: string,
+  dates: string[],
+): Promise<Map<string, ScheduleRows>> {
+  const dbDates = new Map(dates.map((date) => [date, dateOnlyToDb(date)]));
+
+  const [workingHours, availability, exceptions] = await Promise.all([
+    prisma.workingHours.findMany(),
+    prisma.doctorAvailability.findMany({ where: { doctorId } }),
+    prisma.scheduleException.findMany({
+      where: { date: { in: [...dbDates.values()] }, OR: [{ doctorId }, { doctorId: null }] },
+      orderBy: [{ date: 'asc' }, { createdAt: 'desc' }],
+    }),
+  ]);
+
+  const hoursByWeekday = new Map(workingHours.map((row) => [row.dayOfWeek, row]));
+  const availabilityByWeekday = new Map(availability.map((row) => [row.dayOfWeek, row]));
+
+  const result = new Map<string, ScheduleRows>();
+  for (const date of dates) {
+    const dbDate = dbDates.get(date)!;
+    const dayExceptions = exceptions.filter((row) => row.date.getTime() === dbDate.getTime());
+    const weekday = isoWeekday(date);
+    result.set(date, {
+      weekday,
+      doctorException: dayExceptions.find((row) => row.doctorId === doctorId) ?? null,
+      clinicException: dayExceptions.find((row) => row.doctorId === null) ?? null,
+      doctorHours: availabilityByWeekday.get(weekday) ?? null,
+      clinicHours: hoursByWeekday.get(weekday) ?? null,
+    });
+  }
+  return result;
+}
+
 export function isWithinWindow(
   window: ScheduleWindow,
   startMinute: number,
@@ -250,27 +330,26 @@ export interface Slot {
   conflictWith?: string;
 }
 
-export async function buildDaySlots(
-  doctorId: string,
+/** A day of availability for a doctor, used by range endpoints. */
+export interface DateSchedule {
+  date: string;
+  window: ScheduleWindow;
+  slots: Slot[];
+}
+
+/**
+ * Pure slot grid for one resolved window. `buildDaySlots` and
+ * `buildSlotsForDates` share it so availability cannot diverge.
+ */
+export function slotsForWindow(
+  window: ScheduleWindow,
   dateOnly: string,
   durationMinutes: number,
   slotIntervalMinutes: number,
-): Promise<{ window: ScheduleWindow; slots: Slot[] }> {
-  const window = await resolveSchedule(doctorId, dateOnly);
-  if (!window.isOpen) return { window, slots: [] };
-
-  const { clinicLocalToUtc } = await import('../../lib/time.js');
-  const { start: dayStartUtc, end: dayEndUtc } = clinicDayRange(dateOnly);
-
-  const booked = await prisma.appointment.findMany({
-    where: {
-      doctorId,
-      status: { in: ACTIVE_STATUSES },
-      startAt: { lt: dayEndUtc },
-      endAt: { gt: dayStartUtc },
-    },
-    select: { id: true, startAt: true, endAt: true },
-  });
+  booked: Array<{ id: string; startAt: Date; endAt: Date }>,
+  now: Date = new Date(),
+): Slot[] {
+  if (!window.isOpen) return [];
 
   const slots: Slot[] = [];
   const interval = Math.max(5, slotIntervalMinutes);
@@ -286,7 +365,7 @@ export async function buildDaySlots(
     }
     const start = clinicLocalToUtc(dateOnly, minute);
     const end = new Date(start.getTime() + durationMinutes * 60_000);
-    if (start.getTime() < Date.now()) continue;
+    if (start.getTime() < now.getTime()) continue;
 
     const conflict = booked.find((b) => b.startAt < end && b.endAt > start);
     slots.push({
@@ -298,7 +377,72 @@ export async function buildDaySlots(
     });
   }
 
-  return { window, slots };
+  return slots;
+}
+
+export async function buildDaySlots(
+  doctorId: string,
+  dateOnly: string,
+  durationMinutes: number,
+  slotIntervalMinutes: number,
+): Promise<{ window: ScheduleWindow; slots: Slot[] }> {
+  const [window, booked] = await Promise.all([
+    resolveSchedule(doctorId, dateOnly),
+    prisma.appointment.findMany({
+      where: {
+        doctorId,
+        status: { in: ACTIVE_STATUSES },
+        startAt: { lt: clinicDayRange(dateOnly).end },
+        endAt: { gt: clinicDayRange(dateOnly).start },
+      },
+      select: { id: true, startAt: true, endAt: true },
+    }),
+  ]);
+
+  return {
+    window,
+    slots: slotsForWindow(window, dateOnly, durationMinutes, slotIntervalMinutes, booked),
+  };
+}
+
+/**
+ * Availability for several consecutive clinic days with a bounded number of
+ * queries (one per source for the whole range). Used by quick actions; the
+ * per-day result is identical to calling `buildDaySlots` for each date.
+ */
+export async function buildSlotsForDates(
+  doctorId: string,
+  dates: string[],
+  durationMinutes: number,
+  slotIntervalMinutes: number,
+  now: Date = new Date(),
+): Promise<DateSchedule[]> {
+  if (dates.length === 0) return [];
+  const ordered = [...dates].sort();
+  const rows = await loadScheduleRows(doctorId, ordered);
+
+  const rangeStart = clinicDayRange(ordered[0]!).start;
+  const rangeEnd = clinicDayRange(ordered[ordered.length - 1]!).end;
+  const booked = await prisma.appointment.findMany({
+    where: {
+      doctorId,
+      status: { in: ACTIVE_STATUSES },
+      startAt: { lt: rangeEnd },
+      endAt: { gt: rangeStart },
+    },
+    select: { id: true, startAt: true, endAt: true },
+  });
+
+  return ordered.map((date) => {
+    const window = resolveScheduleFromRows(rows.get(date)!);
+    const { start, end } = clinicDayRange(date);
+    const dayBooked = booked.filter((b) => b.startAt < end && b.endAt > start);
+    return {
+      date,
+      window,
+      slots: slotsForWindow(window, date, durationMinutes, slotIntervalMinutes, dayBooked, now),
+    };
+  });
 }
 
 export function assertTransitionAllowed(
