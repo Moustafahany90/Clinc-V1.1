@@ -32,7 +32,6 @@ import { VisitsPage } from './routes/VisitsPage';
 interface SetupStatus {
   setupRequired: boolean;
   hasAnyUser: boolean;
-  emailConfigured: boolean;
 }
 
 function AppRoutes() {
@@ -48,7 +47,7 @@ function AppRoutes() {
       })
       .catch(() => {
         // If the backend is unreachable, let the normal auth flow surface it.
-        if (active) setStatus({ setupRequired: false, hasAnyUser: true, emailConfigured: false });
+        if (active) setStatus({ setupRequired: false, hasAnyUser: true });
       });
     return () => {
       active = false;

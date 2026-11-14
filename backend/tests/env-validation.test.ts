@@ -24,7 +24,6 @@ function loadEnv(overrides: Record<string, string>) {
         TRUST_PROXY: '1',
         JWT_ACCESS_SECRET: 'a'.repeat(48),
         JWT_REFRESH_SECRET: 'b'.repeat(48),
-        EMAIL_ENABLED: 'false',
         ...overrides,
       },
       encoding: 'utf8',

@@ -29,7 +29,7 @@ export function whatsappConfigured(): boolean {
  */
 export function toWhatsAppRecipient(
   phone: string | null | undefined,
-  defaultCountryCode = env.EVOLUTION_DEFAULT_COUNTRY_CODE || env.WHATSAPP_DEFAULT_COUNTRY_CODE,
+  defaultCountryCode = env.EVOLUTION_DEFAULT_COUNTRY_CODE,
 ): string | null {
   if (!phone) return null;
   let digits = phone.replace(/\D/g, '');

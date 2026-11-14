@@ -4,11 +4,10 @@ import { prisma } from '../../lib/prisma.js';
 import { env } from '../../config/env.js';
 import { asyncHandler, badRequest, notFound } from '../../lib/errors.js';
 import { parseBody, parseParams, parseQuery, uuidSchema } from '../../lib/validate.js';
-import { authenticate, currentUser, requirePermission } from '../../middleware/auth.js';
+import { authenticate, requirePermission } from '../../middleware/auth.js';
 import { auditFromRequest } from '../../lib/audit.js';
 import { getClinicSettings } from '../../lib/clinic.js';
 import { clinicDateString, dateOnlyToDb, setClinicTimezone } from '../../lib/time.js';
-import { emailConfigured, sendMail } from '../../lib/email.js';
 import {
   whatsappConfigured,
   getEvolutionStatus,
@@ -46,18 +45,8 @@ settingsRouter.get(
         currency: clinic.currency,
         defaultAppointmentMinutes: clinic.defaultAppointmentMinutes,
         slotIntervalMinutes: clinic.slotIntervalMinutes,
-        emailEnabled: clinic.emailEnabled,
-        emailProvider: clinic.emailProvider,
-        emailFromAddress: clinic.emailFromAddress,
-        dailyDoctorDigest: clinic.dailyDoctorDigest,
-        digestSendHour: clinic.digestSendHour,
         setupCompletedAt: clinic.setupCompletedAt,
       },
-      emailConfigured: emailConfigured(),
-      emailWarning:
-        clinic.emailEnabled && !emailConfigured()
-          ? 'Email is enabled in settings but SMTP/Graph credentials are missing. Clinic operations continue normally.'
-          : null,
       serverTimezone: env.APP_TIMEZONE,
     });
   }),
@@ -73,11 +62,6 @@ const updateSettingsSchema = z.object({
   currency: z.string().trim().length(3).optional(),
   defaultAppointmentMinutes: z.number().int().min(5).max(120).optional(),
   slotIntervalMinutes: z.number().int().min(5).max(60).optional(),
-  emailEnabled: z.boolean().optional(),
-  emailProvider: z.enum(['smtp', 'graph']).optional(),
-  emailFromAddress: z.string().trim().email().nullable().optional().or(z.literal('')),
-  dailyDoctorDigest: z.boolean().optional(),
-  digestSendHour: z.number().int().min(0).max(23).optional(),
 });
 
 settingsRouter.patch(
@@ -95,14 +79,11 @@ settingsRouter.patch(
         id: 1,
         ...payload,
         email: payload.email || null,
-        emailFromAddress: payload.emailFromAddress || null,
         currency: payload.currency?.toUpperCase(),
       },
       update: {
         ...payload,
         email: payload.email === undefined ? undefined : payload.email || null,
-        emailFromAddress:
-          payload.emailFromAddress === undefined ? undefined : payload.emailFromAddress || null,
         currency: payload.currency?.toUpperCase(),
       },
     });
@@ -116,7 +97,7 @@ settingsRouter.patch(
       metadata: { fields: Object.keys(payload) },
     });
 
-    res.json({ clinic, emailConfigured: emailConfigured() });
+    res.json({ clinic });
   }),
 );
 
@@ -608,44 +589,12 @@ settingsRouter.get(
       { key: 'doctor', label: 'At least one doctor account', done: doctors > 0 },
       { key: 'receptionist', label: 'At least one receptionist account', done: receptionists > 0 },
       { key: 'services', label: 'Exam services', done: services > 0 },
-      { key: 'email', label: 'Email delivery (optional)', done: emailConfigured(), optional: true },
       { key: 'patient', label: 'First patient (optional)', done: patients > 0, optional: true },
     ];
 
     res.json({
       items,
       completed: items.filter((i) => !i.optional).every((i) => i.done),
-      emailConfigured: emailConfigured(),
-    });
-  }),
-);
-
-settingsRouter.post(
-  '/test-email',
-  requirePermission('SETTINGS_MANAGE'),
-  asyncHandler(async (req, res) => {
-    const me = currentUser(req);
-    const payload = parseBody(
-      z.object({ to: z.string().trim().email().optional() }),
-      req,
-    );
-    const to = payload.to ?? me.email;
-    const result = await sendMail({
-      to,
-      subject: 'Clinic email test',
-      template: 'test',
-      text: 'This is a test message from your ultrasound clinic system. Email delivery is working.',
-    });
-    await auditFromRequest(req, {
-      action: 'settings.test_email',
-      entityType: 'ClinicSettings',
-      entityId: '1',
-      metadata: { sent: result.sent },
-    });
-    res.json({
-      sent: result.sent,
-      reason: result.reason ?? null,
-      configured: emailConfigured(),
     });
   }),
 );

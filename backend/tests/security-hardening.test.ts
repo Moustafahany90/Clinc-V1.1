@@ -176,7 +176,6 @@ before(async () => {
       email: 'security.doctor@clinic.test',
       role: 'DOCTOR',
       password: 'Str0ng!Passw0rd',
-      sendInvite: false,
     },
   });
   assert.equal(doctor.status, 201, JSON.stringify(doctor.body));
@@ -193,7 +192,6 @@ before(async () => {
       email: 'security.reception@clinic.test',
       role: 'RECEPTIONIST',
       password: 'Str0ng!Passw0rd',
-      sendInvite: false,
     },
   });
   assert.equal(reception.status, 201, JSON.stringify(reception.body));
@@ -208,7 +206,6 @@ before(async () => {
       email: 'security.temp@clinic.test',
       role: 'RECEPTIONIST',
       password: 'Str0ng!Passw0rd',
-      sendInvite: false,
     },
   });
   assert.equal(temp.status, 201, JSON.stringify(temp.body));
@@ -586,7 +583,6 @@ test('archiving and restoring an account invalidates old access tokens', async (
       email: 'security.removable@clinic.test',
       role: 'RECEPTIONIST',
       password: 'Str0ng!Passw0rd',
-      sendInvite: false,
     },
   });
   assert.equal(created.status, 201, JSON.stringify(created.body));

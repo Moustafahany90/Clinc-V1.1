@@ -122,7 +122,6 @@ before(async () => {
       email: 'removal.second@clinic.test',
       role: 'ADMIN',
       password: 'Str0ng!Passw0rd',
-      sendInvite: false,
     },
   });
   assert.equal(second.status, 201, JSON.stringify(second.body));
@@ -137,7 +136,6 @@ before(async () => {
       email: 'removal.reception@clinic.test',
       role: 'RECEPTIONIST',
       password: 'Str0ng!Passw0rd',
-      sendInvite: false,
     },
   });
   assert.equal(receptionist.status, 201, JSON.stringify(receptionist.body));
@@ -231,7 +229,6 @@ test('removal revokes pending password-setup invitations', async () => {
       lastName: 'Invite',
       email: 'removal.invite@clinic.test',
       role: 'RECEPTIONIST',
-      sendInvite: true,
     },
   });
   assert.equal(invited.status, 201, JSON.stringify(invited.body));

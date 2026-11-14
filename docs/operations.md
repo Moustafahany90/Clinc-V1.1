@@ -36,7 +36,7 @@ change `WEB_BIND` or `POSTGRES_BIND` to `0.0.0.0` on a production host.
 
 The backend exits on startup if production configuration is unsafe: HTTP
 `APP_ORIGIN`, `COOKIE_SECURE=false`, `TRUST_PROXY=0`, identical/placeholder JWT
-secrets, or incomplete email settings. This is intentional; fix the config
+secrets, or a placeholder Evolution API key. This is intentional; fix the config
 instead of bypassing it.
 
 For a LAN-only hostname without public DNS, add `tls internal` inside

@@ -18,7 +18,7 @@
 - Temporary-password accounts are gated server-side: only `/auth/me`, `/auth/change-password`, `/auth/logout` and session listing are reachable; everything else returns `403 PASSWORD_CHANGE_REQUIRED` until the password changes.
 - `APPOINTMENTS_OVERRIDE` and `VISITS_OVERRIDE` are explicit permissions, granted to ADMIN by role and backfilled by migration. They are required (plus a recorded reason) to book outside schedule, complete an appointment without the clinical workflow, or complete a visit without a finalized report.
 - Completed visits are immutable: visit metadata, measurements and new attachments are rejected. Finalized reports are amendment-only, and amendments use optimistic version checks to prevent lost updates.
-- Production fails closed on an HTTP `APP_ORIGIN`, insecure cookies, `TRUST_PROXY=0`, identical/placeholder JWT secrets, or an incomplete email provider. HSTS is enabled only in production.
+- Production fails closed on an HTTP `APP_ORIGIN`, insecure cookies, `TRUST_PROXY=0`, identical/placeholder JWT secrets, or a placeholder Evolution API key. HSTS is enabled only in production.
 - Docker publishes only TLS proxy ports publicly; web/Postgres bind to loopback by default. Backups cover database and uploads, and the restore drill restores into a disposable `*_drill` database.
 - `/healthz` and `/api/v1/readyz` verify the database and expose audit-write failure counters; `/api/v1/health` remains a liveness-only endpoint.
 - Test-account passwords are supplied through `SEED_TEST_PASSWORD` / `SEED_TEMP_PASSWORD` and never committed or logged. Seeding refuses production unless `ALLOW_TEST_SEED=true`.

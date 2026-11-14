@@ -191,12 +191,6 @@ model ClinicSettings {
   defaultAppointmentMinutes Int     @default(15)
   slotIntervalMinutes       Int     @default(15)
 
-  emailEnabled      Boolean @default(false)
-  emailProvider     String  @default("smtp")
-  emailFromAddress  String?
-  dailyDoctorDigest Boolean @default(false)
-  digestSendHour    Int     @default(7)
-
   setupCompletedAt DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -733,18 +727,4 @@ model AuditLog {
 model Sequence {
   name  String @id
   value Int    @default(0)
-}
-
-model EmailLog {
-  id        String    @id @default(uuid()) @db.Uuid
-  toAddress String
-  subject   String
-  template  String
-  status    String    @default("PENDING") // PENDING | SENT | FAILED | SKIPPED
-  error     String?
-  attempts  Int       @default(0)
-  createdAt DateTime  @default(now())
-  sentAt    DateTime?
-
-  @@index([createdAt])
 }
