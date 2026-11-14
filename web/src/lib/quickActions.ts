@@ -234,3 +234,108 @@ export const QUICK_ACTION_STATUSES: AppointmentStatus[] = [
 
 /** Mirrors the server cap for the today's-appointments list. */
 export const QUICK_ACTION_LIMITS = [25, 50, 100, 200] as const;
+
+// Financial quick action response types and fetchers (Phase 2 — Actions 6–9).
+
+export interface DailyMethodRow {
+  key: string;
+  label: string;
+  paymentsCount: number;
+  paymentsMinor: number;
+  refundsMinor: number;
+  netMinor: number;
+}
+
+export interface TodayRevenueResponse {
+  date: string;
+  timezone: string;
+  currency: string;
+  totalRevenueMinor: number;
+  refundsMinor: number;
+  paymentsCount: number;
+  paymentsTotalMinor: number;
+  byMethod: DailyMethodRow[];
+}
+
+export interface MoneyRow {
+  date: string;
+  revenueMinor: number;
+  paymentsCount: number;
+  paymentsMinor: number;
+  refundsMinor: number;
+}
+
+export interface WeeklyRevenueResponse {
+  weekStart: string;
+  weekEnd: string;
+  timezone: string;
+  currency: string;
+  totalRevenueMinor: number;
+  totalPaymentsMinor: number;
+  totalRefundsMinor: number;
+  totalPaymentsCount: number;
+  days: MoneyRow[];
+}
+
+export interface ExpenseCategory {
+  name: string;
+  totalMinor: number;
+}
+
+export interface TodayExpensesResponse {
+  date: string;
+  timezone: string;
+  currency: string;
+  totalMinor: number;
+  count: number;
+  byCategory: ExpenseCategory[];
+  details?: ExpenseRow[];
+}
+
+export interface ExpenseRow {
+  id: string;
+  expenseDate: Date;
+  amountMinor: number;
+  category: { name: string };
+  description: string | null;
+  methodKey: string | null;
+  reference: string | null;
+  status: string;
+}
+
+export interface FinancialSummaryResponse {
+  date: string;
+  currency: string;
+  revenueTodayMinor: number;
+  expensesTodayMinor: number;
+  netMinor: number;
+}
+
+export interface WeeklyRevenueFilters {
+  weekStart?: string;
+}
+
+export function fetchTodayRevenue(
+  signal?: AbortSignal,
+): Promise<TodayRevenueResponse> {
+  return get('/quick-actions/revenue/today', {}, signal);
+}
+
+export function fetchWeeklyRevenue(
+  filters: WeeklyRevenueFilters = {},
+  signal?: AbortSignal,
+): Promise<WeeklyRevenueResponse> {
+  return get('/quick-actions/revenue/weekly', filters, signal);
+}
+
+export function fetchTodayExpenses(
+  signal?: AbortSignal,
+): Promise<TodayExpensesResponse> {
+  return get('/quick-actions/expenses/today', {}, signal);
+}
+
+export function fetchFinancialSummary(
+  signal?: AbortSignal,
+): Promise<FinancialSummaryResponse> {
+  return get('/quick-actions/financial-summary', {}, signal);
+}

@@ -5,6 +5,9 @@ import {
   CalendarRange,
   ListChecks,
   Zap,
+  DollarSign,
+  PieChart,
+  TrendingUp,
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
@@ -15,13 +18,21 @@ import { TodayAppointmentsPanel } from './TodayAppointmentsPanel';
 import { WeeklyAvailabilityPanel } from './WeeklyAvailabilityPanel';
 import { DoctorSchedulePanel } from './DoctorSchedulePanel';
 import { NextAvailablePanel } from './NextAvailablePanel';
+import { TodayRevenuePanel } from './TodayRevenuePanel';
+import { WeeklyRevenuePanel } from './WeeklyRevenuePanel';
+import { TodayExpensesPanel } from './TodayExpensesPanel';
+import { FinancialSummaryPanel } from './FinancialSummaryPanel';
 
 type QuickActionId =
   | 'availability-today'
   | 'appointments-today'
   | 'availability-week'
   | 'doctor-schedule'
-  | 'next-available';
+  | 'next-available'
+  | 'revenue-today'
+  | 'revenue-weekly'
+  | 'expenses-today'
+  | 'financial-summary';
 
 interface QuickActionDefinition {
   id: QuickActionId;
@@ -66,6 +77,34 @@ const ACTIONS: QuickActionDefinition[] = [
     description: 'Earliest slot in 60 days',
     icon: Zap,
     permission: 'APPOINTMENTS_READ',
+  },
+  {
+    id: 'revenue-today',
+    label: "Today's revenue",
+    description: 'Net revenue and payments by method',
+    icon: TrendingUp,
+    permission: 'FINANCE_READ',
+  },
+  {
+    id: 'revenue-weekly',
+    label: 'Weekly revenue',
+    description: 'Saturday → Friday, clinic week',
+    icon: CalendarRange,
+    permission: 'FINANCE_READ',
+  },
+  {
+    id: 'expenses-today',
+    label: "Today's expenses",
+    description: 'Spending grouped by category',
+    icon: PieChart,
+    permission: 'FINANCE_READ',
+  },
+  {
+    id: 'financial-summary',
+    label: 'Financial summary',
+    description: "Today's revenue, expenses and net",
+    icon: DollarSign,
+    permission: 'FINANCE_READ',
   },
 ];
 
@@ -146,6 +185,10 @@ export function QuickActionsPage() {
             {current.id === 'availability-week' && <WeeklyAvailabilityPanel />}
             {current.id === 'doctor-schedule' && <DoctorSchedulePanel />}
             {current.id === 'next-available' && <NextAvailablePanel />}
+            {current.id === 'revenue-today' && <TodayRevenuePanel />}
+            {current.id === 'revenue-weekly' && <WeeklyRevenuePanel />}
+            {current.id === 'expenses-today' && <TodayExpensesPanel />}
+            {current.id === 'financial-summary' && <FinancialSummaryPanel />}
           </div>
         </>
       )}
