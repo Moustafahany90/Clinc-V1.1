@@ -4,6 +4,8 @@ import {
   CalendarClock,
   CalendarRange,
   ListChecks,
+  CalendarDays,
+  Users,
   Zap,
   DollarSign,
   PieChart,
@@ -22,6 +24,10 @@ import { TodayRevenuePanel } from './TodayRevenuePanel';
 import { WeeklyRevenuePanel } from './WeeklyRevenuePanel';
 import { TodayExpensesPanel } from './TodayExpensesPanel';
 import { FinancialSummaryPanel } from './FinancialSummaryPanel';
+import { TodayAppointmentsSummaryPanel } from './TodayAppointmentsSummaryPanel';
+import { QueueStatusPanel } from './QueueStatusPanel';
+import { PatientsServedPanel } from './PatientsServedPanel';
+import { WeeklyAppointmentsPanel } from './WeeklyAppointmentsPanel';
 
 type QuickActionId =
   | 'availability-today'
@@ -32,7 +38,11 @@ type QuickActionId =
   | 'revenue-today'
   | 'revenue-weekly'
   | 'expenses-today'
-  | 'financial-summary';
+  | 'financial-summary'
+  | 'today-summary'
+  | 'queue-status'
+  | 'patients-served'
+  | 'weekly-appointments';
 
 interface QuickActionDefinition {
   id: QuickActionId;
@@ -105,6 +115,34 @@ const ACTIONS: QuickActionDefinition[] = [
     description: "Today's revenue, expenses and net",
     icon: DollarSign,
     permission: 'FINANCE_READ',
+  },
+  {
+    id: 'today-summary',
+    label: "Today's appointments",
+    description: 'Total appointments, broken down by status',
+    icon: CalendarDays,
+    permission: 'APPOINTMENTS_READ',
+  },
+  {
+    id: 'queue-status',
+    label: 'Queue status',
+    description: 'Waiting, called, in-exam, done and skipped',
+    icon: ListChecks,
+    permission: 'QUEUE_READ',
+  },
+  {
+    id: 'patients-served',
+    label: 'Patients served today',
+    description: 'Distinct patients seen today',
+    icon: Users,
+    permission: 'PATIENTS_READ',
+  },
+  {
+    id: 'weekly-appointments',
+    label: 'Weekly appointments',
+    description: 'Saturday → Friday clinic week total and status breakdown',
+    icon: CalendarRange,
+    permission: 'APPOINTMENTS_READ',
   },
 ];
 
@@ -189,6 +227,10 @@ export function QuickActionsPage() {
             {current.id === 'revenue-weekly' && <WeeklyRevenuePanel />}
             {current.id === 'expenses-today' && <TodayExpensesPanel />}
             {current.id === 'financial-summary' && <FinancialSummaryPanel />}
+            {current.id === 'today-summary' && <TodayAppointmentsSummaryPanel />}
+            {current.id === 'queue-status' && <QueueStatusPanel />}
+            {current.id === 'patients-served' && <PatientsServedPanel />}
+            {current.id === 'weekly-appointments' && <WeeklyAppointmentsPanel />}
           </div>
         </>
       )}

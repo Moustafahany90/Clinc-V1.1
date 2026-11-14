@@ -339,3 +339,60 @@ export function fetchFinancialSummary(
 ): Promise<FinancialSummaryResponse> {
   return get('/quick-actions/financial-summary', {}, signal);
 }
+
+// Statistics quick action response types and fetchers (Phase 3 — Actions 10–13).
+
+export interface TodayAppointmentsSummaryResponse {
+  date: string;
+  timezone: string;
+  total: number;
+  byStatus: Record<AppointmentStatus, number>;
+}
+
+export interface QueueStatusTodayResponse {
+  date: string;
+  timezone: string;
+  waiting: number;
+  called: number;
+  inExam: number;
+  skipped: number;
+  done: number;
+}
+
+export interface PatientsServedTodayResponse {
+  date: string;
+  timezone: string;
+  total: number;
+}
+
+export interface WeeklyAppointmentsSummaryResponse {
+  weekStart: string;
+  weekEnd: string;
+  timezone: string;
+  total: number;
+  byStatus: Record<AppointmentStatus, number>;
+}
+
+export function fetchTodayAppointmentsSummary(
+  signal?: AbortSignal,
+): Promise<TodayAppointmentsSummaryResponse> {
+  return get('/quick-actions/appointments/today-summary', {}, signal);
+}
+
+export function fetchQueueStatusToday(
+  signal?: AbortSignal,
+): Promise<QueueStatusTodayResponse> {
+  return get('/quick-actions/queue/status', {}, signal);
+}
+
+export function fetchPatientsServedToday(
+  signal?: AbortSignal,
+): Promise<PatientsServedTodayResponse> {
+  return get('/quick-actions/patients/today-summary', {}, signal);
+}
+
+export function fetchWeeklyAppointmentsSummary(
+  signal?: AbortSignal,
+): Promise<WeeklyAppointmentsSummaryResponse> {
+  return get('/quick-actions/appointments/week-summary', {}, signal);
+}

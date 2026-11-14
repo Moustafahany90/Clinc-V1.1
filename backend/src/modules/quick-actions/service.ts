@@ -397,6 +397,152 @@ export async function getNextAvailableAppointment(
           slot: first.slot,
         }
       : null,
-    message: first ? null : `No availability in the next ${NEXT_AVAILABLE_HORIZON_DAYS} days.`,
+  }
+}
+
+
+/** Action 10 - today's appointments summary (total + byStatus). */
+export interface TodayAppointmentsSummaryResponse {
+  date: string;
+  timezone: string;
+  total: number;
+  byStatus: Record<AppointmentStatus, number>;
+}
+
+export async function getTodayAppointmentsSummary(me: AuthUser) {
+  const today = clinicDateString();
+  const range = clinicDayRange(today);
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      startAt: { gte: range.start, lt: range.end },
+    },
+    select: { status: true },
+  });
+  const byStatus: Record<AppointmentStatus, number> = {
+    BOOKED: 0,
+    CONFIRMED: 0,
+    ARRIVED: 0,
+    WAITING: 0,
+    IN_EXAM: 0,
+    REPORT_REVIEW: 0,
+    DONE: 0,
+    CANCELLED: 0,
+    NO_SHOW: 0,
+  };
+  for (const appt of appointments) {
+    byStatus[appt.status] = (byStatus[appt.status] ?? 0) + 1;
+  }
+  return {
+    date: today,
+    timezone: (await getClinicSettings()).timezone,
+    total: appointments.length,
+    byStatus,
   };
 }
+
+/** Action 11 - today's queue status (waiting / called / inExam / done / skipped). */
+export interface QueueStatusTodayResponse {
+  date: string;
+  timezone: string;
+  waiting: number;
+  called: number;
+  inExam: number;
+  skipped: number;
+  done: number;
+}
+
+export async function getQueueStatusToday(me: AuthUser) {
+  const today = clinicDateString();
+  const queueEntries = await prisma.queueEntry.groupBy({
+    by: ['status'],
+    where: {
+      queueDate: new Date(`${today}T00:00:00.000Z`),
+    },
+    _count: { _all: true },
+  });
+  const totals: Record<string, number> = {
+    WAITING: 0,
+    CALLED: 0,
+    IN_EXAM: 0,
+    SKIPPED: 0,
+    DONE: 0,
+  };
+  for (const entry of queueEntries) {
+    totals[entry.status] = entry._count._all;
+  }
+  return {
+    date: today,
+    timezone: (await getClinicSettings()).timezone,
+    waiting: totals.WAITING,
+    called: totals.CALLED,
+    inExam: totals.IN_EXAM,
+    skipped: totals.SKIPPED,
+    done: totals.DONE,
+  };
+}
+
+/** Action 12 - patients served today (distinct patients). */
+export interface PatientsServedTodayResponse {
+  date: string;
+  timezone: string;
+  total: number;
+}
+
+export async function getPatientsServedToday(me: AuthUser) {
+  const today = clinicDateString();
+  const range = clinicDayRange(today);
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      startAt: { gte: range.start, lt: range.end },
+    },
+    select: { patient: true },
+  });
+  const patientIds = new Set(appointments.map((appt) => appt.patient.id));
+  return {
+    date: today,
+    timezone: (await getClinicSettings()).timezone,
+    total: patientIds.size,
+  };
+}
+
+/** Action 13 - weekly appointments summary (total + byStatus). */
+export interface WeeklyAppointmentsSummaryResponse {
+  weekStart: string;
+  weekEnd: string;
+  timezone: string;
+  total: number;
+  byStatus: Record<AppointmentStatus, number>;
+}
+
+export async function getWeeklyAppointmentsSummary(me: AuthUser) {
+  const today = clinicDateString();
+  const week = clinicWeekRange(today);
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      startAt: { gte: week.start, lt: week.end },
+    },
+    select: { status: true },
+  });
+  const byStatus: Record<AppointmentStatus, number> = {
+    BOOKED: 0,
+    CONFIRMED: 0,
+    ARRIVED: 0,
+    WAITING: 0,
+    IN_EXAM: 0,
+    REPORT_REVIEW: 0,
+    DONE: 0,
+    CANCELLED: 0,
+    NO_SHOW: 0,
+  };
+  for (const appt of appointments) {
+    byStatus[appt.status] = (byStatus[appt.status] ?? 0) + 1;
+  }
+  return {
+    weekStart: week.start,
+    weekEnd: week.end,
+    timezone: (await getClinicSettings()).timezone,
+    total: appointments.length,
+    byStatus,
+  };
+}
+
