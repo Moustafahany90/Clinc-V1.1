@@ -273,32 +273,57 @@ async function loadScheduleRows(
   doctorId: string,
   dates: string[],
 ): Promise<Map<string, ScheduleRows>> {
-  const dbDates = new Map(dates.map((date) => [date, dateOnlyToDb(date)]));
+  const rows = await loadScheduleRowsForDoctors([doctorId], dates);
+  return new Map(
+    dates.map((date) => [date, rows.get(`${doctorId}|${date}`)!]),
+  );
+}
+
+/**
+ * Bulk schedule rows for many doctors and dates. Queries each source once for
+ * the whole range, so wide quick-action views stay free of N+1 queries.
+ */
+async function loadScheduleRowsForDoctors(
+  doctorIds: string[],
+  dates: string[],
+): Promise<Map<string, ScheduleRows>> {
+  const uniqueDoctors = [...new Set(doctorIds)];
+  const uniqueDates = [...new Set(dates)].sort();
+  const result = new Map<string, ScheduleRows>();
+  if (uniqueDoctors.length === 0 || uniqueDates.length === 0) return result;
+
+  const dbDates = new Map(uniqueDates.map((date) => [date, dateOnlyToDb(date)]));
 
   const [workingHours, availability, exceptions] = await Promise.all([
     prisma.workingHours.findMany(),
-    prisma.doctorAvailability.findMany({ where: { doctorId } }),
+    prisma.doctorAvailability.findMany({ where: { doctorId: { in: uniqueDoctors } } }),
     prisma.scheduleException.findMany({
-      where: { date: { in: [...dbDates.values()] }, OR: [{ doctorId }, { doctorId: null }] },
+      where: {
+        date: { in: [...dbDates.values()] },
+        OR: [{ doctorId: { in: uniqueDoctors } }, { doctorId: null }],
+      },
       orderBy: [{ date: 'asc' }, { createdAt: 'desc' }],
     }),
   ]);
 
   const hoursByWeekday = new Map(workingHours.map((row) => [row.dayOfWeek, row]));
-  const availabilityByWeekday = new Map(availability.map((row) => [row.dayOfWeek, row]));
+  const availabilityByDoctorWeekday = new Map(
+    availability.map((row) => [`${row.doctorId}|${row.dayOfWeek}`, row]),
+  );
 
-  const result = new Map<string, ScheduleRows>();
-  for (const date of dates) {
-    const dbDate = dbDates.get(date)!;
-    const dayExceptions = exceptions.filter((row) => row.date.getTime() === dbDate.getTime());
-    const weekday = isoWeekday(date);
-    result.set(date, {
-      weekday,
-      doctorException: dayExceptions.find((row) => row.doctorId === doctorId) ?? null,
-      clinicException: dayExceptions.find((row) => row.doctorId === null) ?? null,
-      doctorHours: availabilityByWeekday.get(weekday) ?? null,
-      clinicHours: hoursByWeekday.get(weekday) ?? null,
-    });
+  for (const doctorId of uniqueDoctors) {
+    for (const date of uniqueDates) {
+      const dbDate = dbDates.get(date)!;
+      const dayExceptions = exceptions.filter((row) => row.date.getTime() === dbDate.getTime());
+      const weekday = isoWeekday(date);
+      result.set(`${doctorId}|${date}`, {
+        weekday,
+        doctorException: dayExceptions.find((row) => row.doctorId === doctorId) ?? null,
+        clinicException: dayExceptions.find((row) => row.doctorId === null) ?? null,
+        doctorHours: availabilityByDoctorWeekday.get(`${doctorId}|${weekday}`) ?? null,
+        clinicHours: hoursByWeekday.get(weekday) ?? null,
+      });
+    }
   }
   return result;
 }
@@ -405,10 +430,65 @@ export async function buildDaySlots(
   };
 }
 
+/** Availability for one doctor on one date, used by multi-doctor ranges. */
+export interface DoctorDateSchedule {
+  doctorId: string;
+  date: string;
+  window: ScheduleWindow;
+  slots: Slot[];
+}
+
 /**
- * Availability for several consecutive clinic days with a bounded number of
- * queries (one per source for the whole range). Used by quick actions; the
- * per-day result is identical to calling `buildDaySlots` for each date.
+ * Availability for several doctors across several clinic days with a bounded
+ * number of queries (one per source for the whole range). Used by quick
+ * actions; each (doctor, day) result is identical to `buildDaySlots`.
+ */
+export async function buildSlotsForDoctorDates(
+  doctorIds: string[],
+  dates: string[],
+  durationMinutes: number,
+  slotIntervalMinutes: number,
+  now: Date = new Date(),
+): Promise<DoctorDateSchedule[]> {
+  const uniqueDoctors = [...new Set(doctorIds)].sort();
+  const ordered = [...new Set(dates)].sort();
+  if (uniqueDoctors.length === 0 || ordered.length === 0) return [];
+
+  const rows = await loadScheduleRowsForDoctors(uniqueDoctors, ordered);
+
+  const rangeStart = clinicDayRange(ordered[0]!).start;
+  const rangeEnd = clinicDayRange(ordered[ordered.length - 1]!).end;
+  const booked = await prisma.appointment.findMany({
+    where: {
+      doctorId: { in: uniqueDoctors },
+      status: { in: ACTIVE_STATUSES },
+      startAt: { lt: rangeEnd },
+      endAt: { gt: rangeStart },
+    },
+    select: { id: true, doctorId: true, startAt: true, endAt: true },
+  });
+
+  const result: DoctorDateSchedule[] = [];
+  for (const doctorId of uniqueDoctors) {
+    const doctorBooked = booked.filter((row) => row.doctorId === doctorId);
+    for (const date of ordered) {
+      const window = resolveScheduleFromRows(rows.get(`${doctorId}|${date}`)!);
+      const { start, end } = clinicDayRange(date);
+      const dayBooked = doctorBooked.filter((b) => b.startAt < end && b.endAt > start);
+      result.push({
+        doctorId,
+        date,
+        window,
+        slots: slotsForWindow(window, date, durationMinutes, slotIntervalMinutes, dayBooked, now),
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * Availability for several consecutive clinic days for one doctor. Kept as a
+ * thin wrapper so existing callers keep their exact output.
  */
 export async function buildSlotsForDates(
   doctorId: string,
@@ -417,32 +497,14 @@ export async function buildSlotsForDates(
   slotIntervalMinutes: number,
   now: Date = new Date(),
 ): Promise<DateSchedule[]> {
-  if (dates.length === 0) return [];
-  const ordered = [...dates].sort();
-  const rows = await loadScheduleRows(doctorId, ordered);
-
-  const rangeStart = clinicDayRange(ordered[0]!).start;
-  const rangeEnd = clinicDayRange(ordered[ordered.length - 1]!).end;
-  const booked = await prisma.appointment.findMany({
-    where: {
-      doctorId,
-      status: { in: ACTIVE_STATUSES },
-      startAt: { lt: rangeEnd },
-      endAt: { gt: rangeStart },
-    },
-    select: { id: true, startAt: true, endAt: true },
-  });
-
-  return ordered.map((date) => {
-    const window = resolveScheduleFromRows(rows.get(date)!);
-    const { start, end } = clinicDayRange(date);
-    const dayBooked = booked.filter((b) => b.startAt < end && b.endAt > start);
-    return {
-      date,
-      window,
-      slots: slotsForWindow(window, date, durationMinutes, slotIntervalMinutes, dayBooked, now),
-    };
-  });
+  const schedules = await buildSlotsForDoctorDates(
+    [doctorId],
+    dates,
+    durationMinutes,
+    slotIntervalMinutes,
+    now,
+  );
+  return schedules.map(({ date, window, slots }) => ({ date, window, slots }));
 }
 
 export function assertTransitionAllowed(
