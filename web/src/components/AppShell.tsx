@@ -21,6 +21,7 @@ import {
   Users,
   Wallet,
   X,
+  Zap,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { useClinic } from '../lib/clinic';
@@ -58,6 +59,12 @@ const NAV: NavGroup[] = [
     label: 'Workspace',
     items: [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
+      {
+        to: '/quick-actions',
+        label: 'Quick actions',
+        icon: Zap,
+        anyOf: ['APPOINTMENTS_READ', 'PAYMENTS_READ', 'EXPENSES_READ', 'FINANCE_READ'],
+      },
       { to: '/agenda', label: 'Agenda', icon: CalendarDays, permission: 'APPOINTMENTS_READ' },
       { to: '/queue', label: 'Waiting queue', icon: ListOrdered, permission: 'QUEUE_READ' },
       { to: '/patients', label: 'Patients', icon: Users, permission: 'PATIENTS_READ' },
@@ -92,6 +99,7 @@ const SIDEBAR_PREFERENCE_KEY = 'clinic.desktopSidebarCollapsed';
 
 const TITLES: Record<string, string> = {
   '/': 'Dashboard',
+  '/quick-actions': 'Quick actions',
   '/agenda': 'Agenda',
   '/queue': 'Waiting queue',
   '/patients': 'Patients',

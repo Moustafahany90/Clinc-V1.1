@@ -19,6 +19,7 @@ import { PatientDetailPage } from './routes/PatientDetailPage';
 import { PatientsPage } from './routes/PatientsPage';
 import { PaymentsPage } from './routes/PaymentsPage';
 import { QueuePage } from './routes/QueuePage';
+import { QuickActionsPage } from './routes/quick-actions/QuickActionsPage';
 import { ReportEditorPage } from './routes/ReportEditorPage';
 import { ReportPrintPage } from './routes/ReportPrintPage';
 import { ReportsPage } from './routes/ReportsPage';
@@ -120,6 +121,16 @@ function AppRoutes() {
           element={
             <RequirePermission permission="APPOINTMENTS_READ">
               <AgendaPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/quick-actions"
+          element={
+            <RequirePermission
+              anyOf={['APPOINTMENTS_READ', 'PAYMENTS_READ', 'EXPENSES_READ', 'FINANCE_READ']}
+            >
+              <QuickActionsPage />
             </RequirePermission>
           }
         />

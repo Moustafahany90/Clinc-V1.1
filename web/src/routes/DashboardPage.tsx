@@ -14,6 +14,7 @@ import {
   Stethoscope,
   Users,
   Wallet,
+  Zap,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -275,6 +276,16 @@ export function DashboardPage() {
               <SectionCard title="Quick links" icon={ClipboardList}>
                 <div className="grid grid-cols-2 gap-2">
                   {[
+                    {
+                      to: '/quick-actions',
+                      label: 'Quick actions',
+                      icon: Zap,
+                      show:
+                        hasPermission('APPOINTMENTS_READ') ||
+                        hasPermission('PAYMENTS_READ') ||
+                        hasPermission('EXPENSES_READ') ||
+                        hasPermission('FINANCE_READ'),
+                    },
                     { to: '/agenda', label: 'Agenda', icon: CalendarDays, show: hasPermission('APPOINTMENTS_READ') },
                     { to: '/queue', label: 'Queue', icon: ListOrdered, show: hasPermission('QUEUE_READ') },
                     { to: '/patients', label: 'Patients', icon: Users, show: hasPermission('PATIENTS_READ') },
