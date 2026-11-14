@@ -69,14 +69,15 @@ export function DoctorSchedulePanel() {
       bodyClassName="space-y-4"
     >
       <FilterBar>
-        <DoctorFilter
-          doctors={doctors}
-          value={doctorId}
-          onChange={setDoctorId}
-          includeAll={false}
-          className="w-full sm:w-64"
-        />
-        <Field label="From" className="w-[10.5rem]">
+        {!isDoctor && (
+          <DoctorFilter
+            doctors={doctors}
+            value={doctorId}
+            onChange={setDoctorId}
+            includeAll={false}
+            className="w-full sm:w-64"
+          />
+        )}        <Field label="From" className="w-[10.5rem]">
           <Input
             type="date"
             value={from}

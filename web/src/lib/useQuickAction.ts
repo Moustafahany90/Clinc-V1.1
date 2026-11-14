@@ -67,10 +67,13 @@ export function useQuickAction<T>(
     loadRef.current(controller.signal).then(
       (data) => {
         if (controller.signal.aborted || controllerRef.current !== controller) return;
+        // Release the slot so a later manual reload is not treated as a duplicate.
+        controllerRef.current = null;
         setState({ status: 'success', data, error: null });
       },
       (error: unknown) => {
         if (controller.signal.aborted || controllerRef.current !== controller) return;
+        controllerRef.current = null;
         setState({ status: 'error', data: null, error: errorMessage(error) });
       },
     );
