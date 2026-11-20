@@ -73,19 +73,31 @@ running but cannot reach the database is unhealthy.
 - Phase 7 adds opt-in, read-only checks for backup age/mount/verification,
   capacity, container health, certificate expiry, WAL backlog, clock sanity and
   a monitor heartbeat. They are enabled with the `monitoring` Compose profile
-  or run directly. All alerts go to a local JSONL sink until an external channel
-  is explicitly approved.
+  or run directly. The local JSONL sink remains authoritative.
+- Phase 7.1 adds an opt-in Telegram adapter and external dead-man's-switch hook.
+  Both are inert unless their env variables are supplied from a protected
+  `/etc/clinic/monitor.env` (template in `deploy/monitor.env.example`); both were
+  validated only against a local mock and revalidated in Phase 7.2 with
+  `scripts/p72-phase7-regression.sh`. Telegram messages are a strict allowlist
+  and failures never block a check.
 - Approved thresholds: backup age 26 h; capacity 70/85/95%; certificate expiry
   30/14/7 days; WAL count 50/200/500 and age 900/3600/7200 s; clock drift
   60/300/900 s; heartbeat 600/1800/3600 s.
-- No timer, cron job, systemd unit or external alert channel is installed by
-  Phase 7. See `docs/monitoring-runbook.md` for operation and
-  `docs/PRODUCTION_READINESS_PHASE7.md` for validation evidence and the pending
-  channel decision.
-- Reverse-proxy access logs still include request URIs/query strings. Redaction
-  in `web/nginx.conf` / `deploy/Caddyfile` requires separate approval.
+- No timer, cron job, systemd unit, external account or production channel is
+  installed by the audit. No Ubuntu deployment or production rollout has been
+  performed or verified. See `docs/monitoring-runbook.md` for operation and
+  `docs/PRODUCTION_READINESS_PHASE7_2.md` for current validation evidence and the
+  remaining manual Ubuntu actions.
+- Reverse-proxy **access** logs are redacted in `web/nginx.conf` and
+  `deploy/Caddyfile`: path-only (no query string), no Referer/Authorization/Cookie.
+  Both configs validate (`nginx -t`, `caddy validate`) and functional proxy
+  behavior was proven unchanged in disposable containers. Phase 7.2 also limited
+  nginx `error_log` to `crit` and added a path-only structured
+  `upstream-failures.log`, so upstream diagnostics do not leak query strings or
+  Referer values. See `docs/PRODUCTION_READINESS_PHASE7_2.md` §2.
 - Retain logs according to clinic policy and protect them as PHI-adjacent data.
-  The local monitor sink has no built-in rotation; ship or rotate it on the host.
+  The local monitor sink rotates itself (`P7_SINK_MAX_BYTES`, `P7_SINK_KEEP`);
+  `deploy/clinic-monitor.logrotate` is an optional host-managed alternative.
 
 ## WhatsApp report delivery
 
@@ -176,23 +188,28 @@ Run the database and every persistent volume together:
 ./scripts/backup.sh
 ```
 
-The script writes one complete, checksummed set to `backups/` (mode 0700):
-database dump, uploads archive, Evolution session archive, Caddy TLS archives
-when present, `SHA256SUMS-<STAMP>.txt`, and `MANIFEST-<STAMP>.txt`. Artifacts
-are staged and verified before publication, so a failed run does not leave a
+The script writes one complete, encrypted, checksummed set directory to the
+verified destination:
+`/mnt/clinic-backups/<tier>/clinic-<tier>-<STAMP>/`. It contains the encrypted
+database dump, uploads archive, Evolution session archive and Caddy TLS
+archives when present, plus `SHA256SUMS` and `MANIFEST.txt`. Artifacts are
+staged and verified before publication, so a failed run does not leave a
 normal-looking partial set. The manifest is written last and marks a complete
 set. The script never deletes old backups.
 
-Backups contain PHI. The approved production destination is a dedicated 500 GB
-external USB HDD mounted by UUID at `/mnt/clinic-backups`. It is **local backup
-storage, not off-site storage**; no rclone remote or off-site protection is
-configured.
+Backups contain PHI. The approved production destination is a dedicated **500 GB
+internal SATA HDD** mounted by UUID at `/mnt/clinic-backups`. It is **local backup
+storage only**; no off-site provider or rclone remote is configured. A separate
+**USB flash drive is reserved solely for age private-key escrow**, not for backup
+or WAL data. No Ubuntu deployment or production rollout has been performed or
+verified.
 
 ```bash
-# In /etc/clinic/backup.env (mode 0600), with the public key only:
-BACKUP_DIR=/mnt/clinic-backups/backups
-BACKUP_MOUNT_POINT=/mnt/clinic-backups
-BACKUP_REQUIRE_MOUNT=1
+# In /etc/clinic/backup.env (mode 0600, root:root), public recipient only:
+BACKUP_ROOT=/mnt/clinic-backups
+BACKUP_TIER=daily
+BACKUP_EXPECTED_UUID=0f21089c-c507-4903-96e5-daf637100d53
+BACKUP_EXPECTED_FSTYPE=ext4
 BACKUP_AGE_RECIPIENT=age1...
 BACKUP_REQUIRE_ENCRYPTION=1
 BACKUP_QUIESCE_SERVICES='backend web evolution'
@@ -201,12 +218,12 @@ BACKUP_QUIESCE_SERVICES='backend web evolution'
 ```
 
 `BACKUP_QUIESCE_SERVICES` stops application writers for the dump/tar window and
-restarts them on success or failure; never include `db`. `age` must be installed
-when encryption is required, otherwise the script refuses to run. The wrapper
-fails closed if the USB mount is absent or is not the expected UUID device, so
-backups are never silently written to the server's internal disk. Store the age
-private key in external escrow, not on the HDD or production server
-(`docs/backup-restore.md`).
+restarts them on success or failure; never include `db`. Before creating any
+directory, the script validates the real mount, approved UUID (`0f21089c-…`),
+`ext4` filesystem, required directory structure, destination containment and
+writability. A missing age recipient or `age` binary also fails closed. There is
+no fallback to the root filesystem and no plaintext output. Store the age
+private key in escrow on a separate USB flash drive (`docs/backup-restore.md`).
 
 Schedule: daily at 02:00 `Africa/Cairo`, plus before upgrades and migrations.
 Capacity alerts fire at 70%, 85%, and 95%; 95% aborts backup creation. Retention
@@ -222,29 +239,33 @@ BACKUP_MAX_AGE_HOURS=26 BACKUP_VERIFY_REQUIRE_ENCRYPTION=1 \
   ./scripts/backup-verify.sh
 ```
 
-This checks every manifest, artifact, declared SHA-256 and size, and each
-`SHA256SUMS-*.txt`. It also reports encryption state, set age, total size, and
-orphan/incomplete artifacts. Exit status is non-zero on any error. Cron/systemd
-should run it after each backup and alert on failure; the age check catches a
-silently stopped scheduler. The current repository dump
-(`backups/db-20261113T134414Z.dump`) is expected to fail because it has no
-manifest, checksums, or storage archive.
+The verifier discovers `clinic-<tier>-<STAMP>` sets under `daily/`, `weekly/`
+and `monthly/`, validates the mount/UUID/filesystem assumptions, and checks
+each `MANIFEST.txt`, every declared encrypted artifact, its SHA-256 and size,
+`SHA256SUMS`, orphan artifacts, set age and permissions. Exit status is non-zero
+on any error. Cron/systemd should run it after each backup and alert on failure;
+the age check catches a silently stopped scheduler. No schedule is enabled by
+this phase. The preserved legacy dump `backups/db-20261113T134414Z.dump` is
+outside the approved layout and is not a recovery source.
 
 ### PITR and host permissions (Phase 6.1)
 
 PITR was proved only in a disposable PostgreSQL 16 stack (base backup plus WAL
 archive, restored by name and time). The approved production design places WAL
-archives on the USB HDD under `/mnt/clinic-backups/wal-archive` with
+archives on the internal backup HDD under `/mnt/clinic-backups/wal-archive` with
 `archive_timeout=300s` and a mount-checked `archive_command`. Production WAL
 archiving is still off and the production RPO remains unbounded. Do not claim a
 5-minute RPO until deployment, archive monitoring, retention and an isolated
 target-host restore are proven and recorded. See
 `docs/PRODUCTION_READINESS_PHASE6_1.md` §7 and §17.
 
-The intended Ubuntu layout (`0700` backup/key directories, `0600` dump/age
-identity files, `0750` restore directory, deploy account only) was validated in
-an isolated Ubuntu 24.04 container. Verify it on the real host; NTFS ACLs on
-Windows are a separate open finding. See `docs/backup-restore.md`.
+Phase 8.3.1 verified the real host: backup root and all tier/support directories
+are `root:root 0700`, only root can write, the recipient file is `root:root 0600`,
+and the only non-system account is `clinc_server` (no `deploy`/`clinicdeploy`).
+Backups and monitoring must therefore run as root until a dedicated least-
+privilege service account is approved. **No host permissions were changed and no
+Ubuntu deployment/production rollout was performed.** See
+`docs/PRODUCTION_READINESS_PHASE8_3_1.md` §4.
 
 ### Restore drill (non-destructive)
 

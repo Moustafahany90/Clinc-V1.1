@@ -320,8 +320,8 @@ CLINIC_DOMAIN=p7-test.local docker compose -f docker-compose.yml -f docker-compo
    The monitor writes only heartbeat, dedup state and `alerts.jsonl` there.
 3. Set `P7_BACKUP_DIR=/mnt/clinic-backups/backups`,
    `P7_BACKUP_MOUNT=/mnt/clinic-backups`, `P7_REQUIRE_MOUNT=1`,
-   `P7_MAX_AGE_HOURS=26`, and verify the USB UUID mount before enabling checks.
-4. Enable WAL archiving on the USB HDD (`docs/PRODUCTION_READINESS_PHASE6_1.md`)
+   `P7_MAX_AGE_HOURS=26`, and verify the internal backup HDD UUID mount before enabling checks.
+4. Enable WAL archiving on the internal backup HDD (`docs/PRODUCTION_READINESS_PHASE6_1.md`)
    and set `P7_WAL_DIRS` to the local WAL/archive directories to monitor.
 5. Set `P7_CERT_FILES` to the public certificate files only; never point it at
    private keys.

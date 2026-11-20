@@ -12,23 +12,40 @@ once, or invoke each script as `bash scripts/<name>.sh`.
 
 ## What a complete backup set contains
 
-`scripts/backup.sh` publishes one set per run, identified by a UTC stamp
-(`YYYYMMDDTHHMMSSZ`):
+Phase 8.3.1 verified the actual host layout and aligned all scripts to it. One
+set per run is a **directory** inside its tier, named
+`clinic-<tier>-<STAMP>[-<label>]`, where `<tier>` is `daily`, `weekly` or
+`monthly` and `<STAMP>` is `YYYYMMDDTHHMMSSZ`:
+
+```
+/mnt/clinic-backups/
+├── daily/clinic-daily-<STAMP>/       # or weekly/…, monthly/…
+│   ├── db-<STAMP>.dump.age
+│   ├── storage-<STAMP>.tar.gz.age
+│   ├── evolution-<STAMP>.tar.gz.age      (when the volume exists)
+│   ├── <volume>-<STAMP>.tar.gz.age       (when TLS volumes exist)
+│   ├── SHA256SUMS                        # checksums for this set
+│   └── MANIFEST.txt                      # written last; marks a complete set
+├── manifests/                        # present on host; reserved, not used by this engine
+├── quarantine/                       # operator-controlled; scripts never write here
+├── logs/                             # backup-<tier>.log and preflight write probe
+└── wal-archive/                      # reserved; WAL archiving is NOT enabled
+```
 
 | File | Contents |
 |---|---|
-| `db-<STAMP>.dump[.age]` | PostgreSQL custom-format dump |
-| `storage-<STAMP>.tar.gz[.age]` | `uploads` volume (clinical files) |
-| `evolution-<STAMP>.tar.gz[.age]` | Evolution/WhatsApp session volume, when present |
-| `ultrasound_clinic_caddy_data-<STAMP>.tar.gz[.age]` | Caddy TLS data, when the TLS overlay is present |
-| `ultrasound_clinic_caddy_config-<STAMP>.tar.gz[.age]` | Caddy TLS config, when present |
-| `SHA256SUMS-<STAMP>.txt` | SHA-256 for every artifact in the set |
-| `MANIFEST-<STAMP>.txt` | Timestamp, database/volume names, sizes, checksums, Postgres version, Git commit, encryption state, format version |
+| `db-<STAMP>.dump.age` | age-encrypted PostgreSQL custom-format dump |
+| `storage-<STAMP>.tar.gz.age` | age-encrypted `uploads` volume (clinical files) |
+| `evolution-<STAMP>.tar.gz.age` | age-encrypted Evolution/WhatsApp session volume, when present |
+| `<volume>-<STAMP>.tar.gz.age` | age-encrypted Caddy TLS state, when present |
+| `SHA256SUMS` | SHA-256 for every artifact in the set |
+| `MANIFEST.txt` | Timestamp, tier, mount UUID, filesystem, database/volume names, sizes, checksums, PostgreSQL version, Git commit, encryption state, format version |
 
-`MANIFEST-<STAMP>.txt` is written last and marks a complete set. Artifacts are
-staged in a hidden temporary directory and checksummed before they are
-published, so a failed run does not leave a normal-looking partial set. The
-script never deletes old backups; retention is an operator/policy decision.
+`MANIFEST.txt` is written last and marks a complete set. Artifacts are staged
+in a hidden temporary directory inside the set directory and checksummed before
+publication. A failed run removes only the set directory it created; older sets
+are never touched. Retention is an operator/policy decision; no automatic
+deletion exists.
 
 The database dump and the storage archive are still sequential, not a
 point-in-time snapshot. Stop writers during the backup window (see
@@ -45,85 +62,100 @@ Useful environment variables:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BACKUP_DIR` | `backups` | Output directory. On the Ubuntu host this must be under `/mnt/clinic-backups`. |
-| `BACKUP_MOUNT_POINT` | empty | Required external USB mount point. |
-| `BACKUP_REQUIRE_MOUNT` | `0` | Set to `1` to fail closed unless the mount exists and `BACKUP_DIR` is underneath it. |
-| `BACKUP_AGE_RECIPIENT` | empty | age public key. When set, every artifact is encrypted and the plaintext is removed. |
-| `BACKUP_REQUIRE_ENCRYPTION` | `0` | Set to `1` to refuse plaintext output when no recipient is configured. |
-| `BACKUP_OFFSITE_REMOTE` | empty | Legacy rclone option only. Not used in the approved USB architecture; no off-site copy is claimed. |
-| `BACKUP_QUIESCE_SERVICES` | empty | Space-separated application services to stop for the dump/tar window, for example `backend web evolution`. Never include `db`. They are restarted on success or failure. |
-| `BACKUP_MIN_FREE_MB` | `1024` | Refuse to start below this much free space in `BACKUP_DIR`. |
+| `BACKUP_ROOT` | `/mnt/clinic-backups` | The one approved mount root. Tier/support directories are derived from it; no repository-local `backups/` destination exists. |
+| `BACKUP_TIER` | `daily` | Target tier: `daily`, `weekly` or `monthly`. |
+| `BACKUP_LABEL` | empty | Optional suffix for the set directory name (sanitised). |
+| `BACKUP_EXPECTED_UUID` | `0f21089c-c507-4903-96e5-daf637100d53` | Approved filesystem UUID, verified against the mounted disk. |
+| `BACKUP_EXPECTED_FSTYPE` | `ext4` | Approved filesystem type. |
+| `BACKUP_AGE_RECIPIENT` | empty | **Required.** age public recipient; every artifact is encrypted and plaintext removed. |
+| `BACKUP_REQUIRE_ENCRYPTION` | `1` | Must be `1` (or unset). Setting `0` is rejected; plaintext backups are never produced. |
+| `BACKUP_OFFSITE_REMOTE` | empty | Legacy rclone option only. `rclone` is not installed on the verified host; no off-site copy is claimed. |
+| `BACKUP_QUIESCE_SERVICES` | empty | Space-separated writers to stop for the dump/tar window, e.g. `backend web evolution`. Never include `db`. Restarted on success or failure. |
+| `BACKUP_MIN_FREE_MB` | `1024` | Refuse to start below this much free space in the tier directory. |
 | `STORAGE_VOLUME` | `ultrasound_clinic_storage` | Uploads volume name. |
 | `EVOLUTION_VOLUME` | `ultrasound_clinic_evolution_instances` | Evolution session volume name. |
 | `CADDY_VOLUMES` | `ultrasound_clinic_caddy_data ultrasound_clinic_caddy_config` | TLS volumes; missing volumes are warned about. |
 
-### Encryption and external USB storage (approved production architecture)
+### Encryption and internal SATA backup storage (approved production architecture)
 
 Encryption is mandatory in the approved production architecture. Generate an
 age keypair on a machine that is **not** the backup host, keep the private key
-in independently secured escrow, and put only the public recipient on the host.
-The private key must not be stored on the external HDD or on the production
-server.
+in independently secured escrow on a separate USB flash drive, and put only the
+public recipient on the host. The private key must not be stored on the backup
+HDD or on the production server. The USB flash drive is for age key escrow only;
+it is not backup or WAL storage.
 
 ```bash
 # On the trusted administrator machine, once:
 age-keygen -o clinic-backup-key.txt
 # Copy only the public key value into the backup host's protected environment.
 
-# On the Ubuntu host, in /etc/clinic/backup.env (mode 0600):
-BACKUP_DIR=/mnt/clinic-backups/backups
-BACKUP_MOUNT_POINT=/mnt/clinic-backups
-BACKUP_REQUIRE_MOUNT=1
+# On the Ubuntu host, in /etc/clinic/backup.env (mode 0600, root:root):
+BACKUP_ROOT=/mnt/clinic-backups
+BACKUP_TIER=daily
+BACKUP_EXPECTED_UUID=0f21089c-c507-4903-96e5-daf637100d53
+BACKUP_EXPECTED_FSTYPE=ext4
+# Public recipient ONLY; read from the root-only file /etc/clinic-backup/recipient.txt
 BACKUP_AGE_RECIPIENT=age1...
 BACKUP_REQUIRE_ENCRYPTION=1
 BACKUP_QUIESCE_SERVICES='backend web evolution'
 ```
 
-The approved destination is a dedicated 500 GB external USB HDD permanently
-attached to the Ubuntu server and mounted by UUID at `/mnt/clinic-backups`.
-It is **local backup storage, not off-site storage**. No rclone remote is
-configured and no off-site protection is claimed. The Phase 6.1 isolated
-rclone test remains historical validation only.
+The approved destination is a dedicated **500 GB internal SATA HDD**
+(`/dev/sda1`, ext4, label `clinic-backups`) mounted read-write at
+`/mnt/clinic-backups`. Phase 8.3.1 revalidated the UUID, `findmnt`, `blkid` and
+`/etc/fstab` entry directly on the host. It is **local backup storage only**;
+`rclone` is not installed and no off-site protection is claimed.
 
-`BACKUP_REQUIRE_MOUNT=1` makes `backup.sh` fail closed if the mount is absent or
-if `BACKUP_DIR` is not underneath it. The scheduled wrapper additionally checks
-the mountpoint and expected UUID device before starting. WAL archiving uses the
-same disk under `/mnt/clinic-backups/wal-archive` and its `archive_command`
-checks the mount before writing, so a disconnected disk cannot silently spill
-WAL to the internal filesystem.
+Before any directory is created, `backup.sh` calls the shared validator in
+`scripts/backup-common.sh`, which refuses to proceed unless the mount is real,
+its UUID and filesystem match the approved values, all seven required
+directories exist, the destination resolves inside the mount, and the target is
+writable. There is no fallback to the root filesystem. A missing
+`BACKUP_AGE_RECIPIENT`, a disabled `BACKUP_REQUIRE_ENCRYPTION`, or a missing
+`age` binary also fails closed. WAL archiving remains **disabled**; the
+`wal-archive/` directory is reserved only.
 
-Capacity is checked before every backup and every six hours, with email alerts
-at 70%, 85%, and 95%. The 95% threshold aborts backup creation. If `age` is
-configured but not installed, `backup.sh` refuses to run rather than silently
-writing plaintext.
+Capacity is checked in the tier directory before every backup after validation.
+No schedules, timers, alert delivery or retention deletion are enabled by this
+phase.
 
 ## Verify backup sets (read-only)
 
 ```bash
-./scripts/backup-verify.sh
-./scripts/backup-verify.sh /path/to/backups
+./scripts/backup-verify.sh                    # defaults to /mnt/clinic-backups
+./scripts/backup-verify.sh /path/to/backup-root
 ```
 
-For every `MANIFEST-*` it checks that all declared artifacts exist, match their
-declared SHA-256 and size, and pass `SHA256SUMS-*.txt`. It reports encryption
-state, set age, artifact sizes, missing Evolution/Caddy volumes, and
-orphan/incomplete artifacts with no manifest. It never writes, decrypts, or
-contacts the database.
+The verifier discovers `clinic-<tier>-<STAMP>` set directories across `daily/`,
+`weekly/` and `monthly/`. For each `MANIFEST.txt` it checks that declared
+artifacts exist, are age-encrypted, match their declared SHA-256 and size, and
+pass `SHA256SUMS`. It also checks manifest/directory consistency, undeclared
+or missing checksum entries, orphan artifacts, incomplete sets, set age and
+directory/file permissions. It validates the same mount/UUID/filesystem
+assumptions as the producer and never writes, decrypts, or contacts the
+database. `BACKUP_VERIFY_SKIP_MOUNT_CHECK=1` exists only for isolated synthetic
+tests and must never be used in production.
 
 ```bash
 # Monitoring example: fail if the newest complete set is older than 26 hours.
 BACKUP_MAX_AGE_HOURS=26 BACKUP_VERIFY_REQUIRE_ENCRYPTION=1 \
-  ./scripts/backup-verify.sh
+  ./scripts/backup-verify.sh /mnt/clinic-backups
 ```
 
-Expected result for the current repository state is **failure**: the only
-existing artifact, `backups/db-20261113T134414Z.dump`, has no manifest,
-checksums, or storage archive. Treat it as unverified and replace it with a
-complete set. Once a complete set exists, move the old dump to a quarantined
-location outside the verifier's scan path; do not delete it. Otherwise the
-verifier will keep reporting it as an orphan artifact.
+Expected result for the current repository state is **failure**: the legacy
+`backups/db-20261113T134414Z.dump` is outside the approved layout and has no
+manifest or checksums. It is preserved unchanged and must not be moved,
+deleted, or presented as a recovery source without an owner decision.
 
 ### Legacy backup sets (pre-manifest dumps)
+
+> **Phase 8.3.1 compatibility note:** the current verifier only accepts the
+> `clinic-<tier>-<STAMP>/MANIFEST.txt` convention with `backup_format=3` and
+> `SHA256SUMS`. The `backup_format=1` staging example below is retained as
+> historical handling guidance; those staged copies will be reported as
+> non-compliant by the current verifier and must not be treated as production
+> backups.
 
 Older sets may contain only `db-<STAMP>.dump`, sometimes with a matching
 `storage-<STAMP>.tar.gz`, but no `SHA256SUMS-*` or `MANIFEST-*`. The verifier
@@ -231,7 +263,7 @@ and `archive_timeout=10s`; a base backup plus six archived WAL files restored
 correctly by both restore point and target time. See
 `docs/PRODUCTION_READINESS_PHASE6_1.md` §7.
 
-The approved production design uses the external USB HDD at
+The approved production design uses the internal SATA backup HDD at
 `/mnt/clinic-backups/wal-archive` with `archive_timeout=300s` for a target RPO
 of five minutes. **The 5-minute RPO is not claimed until an isolated
 point-in-time recovery succeeds on the Ubuntu host.** Production still has no
@@ -239,8 +271,8 @@ WAL archiving and no PITR runbook activation. Do not assume a better RPO until
 the following are deployed and rehearsed on the target host with written
 approval:
 
-- a dedicated, access-controlled WAL archive destination on the verified USB
-  mount, with `mountpoint` checked by `archive_command`;
+- a dedicated, access-controlled WAL archive destination on the verified internal
+  backup HDD mount, with `mountpoint` checked by `archive_command`;
 - `wal_level=replica`, `archive_mode=on`, a tested `archive_command`, and the
   chosen `archive_timeout=300s`/5-minute RPO target;
 - base backups retained with their matching WAL history;
@@ -254,23 +286,30 @@ deployed and verified.
 
 ## Ubuntu host permissions
 
-Phase 6.1 validated the intended ownership model in Ubuntu 24.04 containers.
-Apply the equivalent on the target host before storing real backups or keys:
+**Verified host state (Phase 8.3.1, read-only inspection):** the mount root and
+every backup directory are `root:root 0700`; write access is available to
+`root` only. The recipient file `/etc/clinic-backup/recipient.txt` is
+`root:root 0600` and contains a valid age public recipient (value not printed).
+The only non-system account is `clinc_server` (UID 1000, `sudo` group); there is
+**no** `deploy` or `clinicdeploy` account and no `postgres` host user. The
+system `backup` account (UID 34) also cannot write to the mount. Historical
+`deploy:clinicdeploy` and `deploy:deploy` documentation is therefore incorrect
+for this host. See `docs/PRODUCTION_READINESS_PHASE8_3_1.md` §4.
 
-```bash
-# Example: deploy account is UID/GID 3001 in group clinicdeploy.
-sudo groupadd --gid 3001 clinicdeploy 2>/dev/null || true
-sudo useradd --uid 3001 --gid clinicdeploy --create-home --shell /bin/sh deploy 2>/dev/null || true
-sudo install -d -m 0700 -o deploy -g clinicdeploy /var/backups/clinic /etc/clinic/keys
-sudo install -d -m 0750 -o deploy -g clinicdeploy /srv/clinic/restore
-sudo install -m 0600 -o deploy -g clinicdeploy /dev/null \
-  /etc/clinic/keys/backup-age-identity.txt
-```
+**Workable model today (no host changes were made):** backup creation must run
+as root (e.g. a root systemd unit or restricted sudo), because only root can
+write the backup directories and read the recipient file. The monitor must also
+run as root to validate the mount and read manifests. This is broader privilege
+than is ideal.
 
-The isolated test confirmed that a second local account could not read the
-backup, the age identity, or the restore file, and could not list the backup
-directory. Verify the same on the production Ubuntu host; do not rely on
-`chmod` alone on Windows/NTFS.
+**Least-privilege recommendation (NOT implemented, requires owner-approved host
+changes):** create a dedicated `clinicbackup` service account, make it the owner
+of the seven backup directories (`0700`) and of a `0600` recipient file, and run
+the producer with that account. Give a separate read-only `clinicmonitor`
+account traversal/read access to the backup tree, or have the monitor consume a
+root-produced status file, so it never needs root. Keep age private-key escrow
+on the separate USB flash drive, never on this disk. Do not change host users,
+groups, ownership or permissions until that plan is approved.
 
 ## Full restore (requires written approval)
 

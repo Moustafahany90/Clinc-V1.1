@@ -1,5 +1,7 @@
 # Production Readiness — Phase 6: Backup, Restore & Disaster Recovery (2026-11-18)
 
+> **Phase 7.2 correction (2026-11-20):** the later owner-approved architecture is a dedicated **500 GB internal SATA HDD** at `/mnt/clinic-backups`, used for **local backup storage only**. A separate USB flash drive is reserved solely for age private-key escrow. No off-site provider is configured, and no Ubuntu deployment or production rollout has been verified. Historical "external USB HDD" wording in this report is superseded by that correction; see `docs/PRODUCTION_READINESS_PHASE7_2.md` §7.
+
 ## 1. Executive summary
 
 **Overall status: COMPLETE FOR REVIEW — audit executed on an isolated synthetic stack. Restore mechanics are proven; disaster-recovery operations are NOT production-ready. No production data, volume, container, or configuration was modified.**

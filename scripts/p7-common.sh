@@ -13,6 +13,14 @@ else
 fi
 P7_HEARTBEAT_FILE="${P7_HEARTBEAT_FILE:-${P7_STATE_DIR}/heartbeat}"
 
+# Phase 7.1 local sink rotation. 0 disables rotation; KEEP counts retained
+# rotated files in addition to the live sink. Only files named exactly
+# "<sink>.<number>" that this code created are ever renamed or removed.
+P7_SINK_MAX_BYTES="${P7_SINK_MAX_BYTES:-1048576}"
+P7_SINK_KEEP="${P7_SINK_KEEP:-5}"
+case "$P7_SINK_MAX_BYTES" in ''|*[!0-9]*) P7_SINK_MAX_BYTES=1048576 ;; esac
+case "$P7_SINK_KEEP" in ''|*[!0-9]*) P7_SINK_KEEP=5 ;; esac
+
 # Test-only shim directory (for isolated failure injection). Never set in production.
 if [ -n "${P7_BIN_DIR:-}" ]; then
   case ":${PATH}:" in
@@ -54,8 +62,33 @@ p7_emit() {
   fi
 }
 
+# Rotate before writing so the newest line is never left in a full file.
+p7_sink_rotate() {
+  [ -n "$P7_ALERT_SINK" ] || return 0
+  [ "$P7_SINK_MAX_BYTES" -gt 0 ] 2>/dev/null || return 0
+  [ -f "$P7_ALERT_SINK" ] || return 0
+  size="$(wc -c <"$P7_ALERT_SINK" 2>/dev/null || printf '0')"
+  [ "${size:-0}" -ge "$P7_SINK_MAX_BYTES" ] || return 0
+  if [ "$P7_SINK_KEEP" -le 1 ]; then
+    # Keep exactly one rotated file; overwrite it rather than lose the lines
+    # that are still within retention.
+    mv -f "$P7_ALERT_SINK" "${P7_ALERT_SINK}.1"
+    return 0
+  fi
+  rm -f "${P7_ALERT_SINK}.${P7_SINK_KEEP}"
+  i=$((P7_SINK_KEEP - 1))
+  while [ "$i" -ge 1 ]; do
+    if [ -f "${P7_ALERT_SINK}.${i}" ]; then
+      mv -f "${P7_ALERT_SINK}.${i}" "${P7_ALERT_SINK}.$((i + 1))"
+    fi
+    i=$((i - 1))
+  done
+  mv -f "$P7_ALERT_SINK" "${P7_ALERT_SINK}.1"
+}
+
 p7_alert() {
   [ -n "$P7_ALERT_SINK" ] || return 0
+  p7_sink_rotate
   mkdir -p "$(dirname "$P7_ALERT_SINK")"
   printf '%s\n' "$1" >>"$P7_ALERT_SINK"
 }

@@ -1,5 +1,7 @@
 # Production Readiness — Phase 6.1: Backup/DR Remediation Validation (2026-11-18)
 
+> **Phase 7.2 correction (2026-11-20):** the current approved backup destination is a dedicated **500 GB internal SATA HDD** at `/mnt/clinic-backups`, used for **local backup storage only**. A separate USB flash drive is reserved solely for age private-key escrow. No off-site provider is configured, and no Ubuntu deployment or production rollout has been verified. Section 17's "external USB HDD" wording remains historical evidence and is superseded by this correction; see `docs/PRODUCTION_READINESS_PHASE7_2.md` §7.
+
 ## 1. Executive summary
 
 **Overall status: COMPLETE FOR REVIEW — production operational validation: `NOT PERFORMED`. Stop gate is active.**

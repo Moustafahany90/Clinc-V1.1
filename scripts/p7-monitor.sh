@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Phase 7 local monitor orchestrator. Runs read-only checks, writes a
+# Phase 7/7.1 local monitor orchestrator. Runs read-only checks, writes a
 # heartbeat, deduplicates/rate-limits alerts, and appends to a local JSONL
-# sink. No external channel is contacted. No timer or service is installed.
+# sink. Optional, opt-in Telegram delivery and external heartbeat hooks are
+# called only from this script and can never block a check. No timer or service
+# is installed.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=p7-common.sh
@@ -40,6 +42,11 @@ forward() {
   printf '%s\n' "$1"
   p7_alert "$1"
   alerts=$((alerts + 1))
+  # Delivery is best-effort and strictly after the local sink write. Any
+  # failure is swallowed so the check pass itself is never affected.
+  if [ -f "${SCRIPT_DIR}/p7-deliver-telegram.sh" ]; then
+    printf '%s\n' "$1" | bash "${SCRIPT_DIR}/p7-deliver-telegram.sh" >/dev/null || true
+  fi
 }
 
 process_line() {
@@ -99,9 +106,18 @@ process_line() {
 }
 
 run_once() {
+  # Test-only skip path: no heartbeat file update and no external ping.
+  if [ "${P7_SKIP_CYCLE:-0}" = "1" ]; then
+    printf '%s\n' "p7-monitor: cycle skipped (P7_SKIP_CYCLE=1); no heartbeat ping"
+    return 0
+  fi
+
   alerts=0
   suppressed=0
   recoveries=0
+
+  # Rotate before any write so a full sink cannot lose the newest alert.
+  p7_sink_rotate
 
   # Write the heartbeat before checks so the dead-man's switch sees a fresh run.
   now="$(p7_now)"
@@ -122,6 +138,12 @@ run_once() {
   done
 
   p7_emit monitor.complete ok info "monitor pass complete" "\"checks\":\"$(p7_json_escape "$CHECKS")\",\"alerts\":${alerts},\"suppressed\":${suppressed},\"recoveries\":${recoveries},\"heartbeat\":\"$(p7_json_escape "$(basename "$P7_HEARTBEAT_FILE")")\",\"runbook\":\"docs/monitoring-runbook.md\""
+
+  # Only a completed cycle pings the external dead-man's switch. If the monitor
+  # aborts earlier, no ping is sent and the service detects the silence.
+  if [ -f "${SCRIPT_DIR}/p7-heartbeat-hook.sh" ]; then
+    bash "${SCRIPT_DIR}/p7-heartbeat-hook.sh" >/dev/null || true
+  fi
 }
 
 if [ "${1:-}" = "--loop" ]; then

@@ -180,6 +180,31 @@ function futureSlot(body: any): any | null {
   );
 }
 
+/**
+ * Seed a booked appointment at a fixed clinic-local minute. The booking API
+ * rejects past appointments, so after hours there is no future slot to book.
+ * Tests that need "today" data must not depend on the wall clock.
+ */
+async function seedTodayAppointment(
+  doctorId: string,
+  patientId: string,
+  startMinute: number,
+): Promise<string> {
+  const startAt = clinicLocalToUtc(clinicDateString(), startMinute);
+  const created = await prisma.appointment.create({
+    data: {
+      doctorId,
+      patientId,
+      startAt,
+      endAt: new Date(startAt.getTime() + 15 * 60_000),
+      durationMinutes: 15,
+      status: 'BOOKED',
+    },
+    select: { id: true },
+  });
+  return created.id;
+}
+
 before(async () => {
   const tables = await prisma.$queryRawUnsafe<Array<{ tablename: string }>>(
     `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'`,
@@ -354,6 +379,10 @@ test('quick actions: appointment and statistics actions 1-13', async (t) => {
       });
       assert.equal(booked.status, 201, JSON.stringify(booked.body));
       alphaTodayAppointmentId = booked.body.appointment.id;
+    } else {
+      // After hours there is no future slot to book. Seed a fixed-time row so
+      // the "today" fixtures below remain deterministic.
+      alphaTodayAppointmentId = await seedTodayAppointment(alphaId, patientOneId, 600);
     }
 
     const quick = await api(
@@ -361,6 +390,13 @@ test('quick actions: appointment and statistics actions 1-13', async (t) => {
       { token: adminToken },
     );
     assert.equal(quick.status, 200, JSON.stringify(quick.body));
+    assert.ok(alphaTodayAppointmentId, 'a today appointment must exist even after hours');
+    if (!slot) {
+      assert.ok(
+        !quick.body.doctors[0].slots.some((entry: any) => entry.minute === 600),
+        'a seeded past appointment must not be offered as an open slot',
+      );
+    }
     if (slot) {
       assert.ok(
         !quick.body.doctors[0].slots.some((entry: any) => entry.start === slot.start),
@@ -409,7 +445,10 @@ test('quick actions: appointment and statistics actions 1-13', async (t) => {
       });
       assert.equal(booked.status, 201, JSON.stringify(booked.body));
       betaTodayAppointmentId = booked.body.appointment.id;
+    } else {
+      betaTodayAppointmentId = await seedTodayAppointment(betaId, patientTwoId, 615);
     }
+    assert.ok(betaTodayAppointmentId, 'a today appointment must exist even after hours');
 
     const admin = await api('/quick-actions/appointments/today', { token: adminToken });
     assert.equal(admin.status, 200, JSON.stringify(admin.body));
@@ -419,6 +458,7 @@ test('quick actions: appointment and statistics actions 1-13', async (t) => {
     assert.equal(admin.body.limit, 50);
     assert.equal(admin.body.hasMore, admin.body.total > 50);
     assert.equal(admin.body.appointments.length, Math.min(admin.body.total, 50));
+    assert.ok(admin.body.total >= 2, 'both seeded doctors must appear in today\'s list');
 
     if (alphaTodayAppointmentId) {
       const alpha = await api(

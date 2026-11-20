@@ -8,8 +8,13 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
-User=deploy
-Group=deploy
+# Phase 8.3.1 verified host: there is no 'deploy' or 'clinicdeploy' account.
+# The backup disk and all backup dirs are root:root 0700, and the only
+# non-system admin account (clinc_server) cannot read them. A monitor that
+# must validate the mount and read manifests therefore has to run as root
+# until an owner-approved dedicated read-only account/ACL is created.
+User=root
+Group=root
 WorkingDirectory=/opt/clinic/Clinc-V1.1
 EnvironmentFile=-/etc/clinic/monitor.env
 ExecStart=/usr/bin/bash scripts/p7-monitor.sh

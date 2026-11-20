@@ -1,0 +1,18 @@
+# Phase 7.1 optional host-side logrotate template -- NOT installed by the audit.
+# The monitor already rotates this sink itself (P7_SINK_MAX_BYTES / P7_SINK_KEEP).
+# Use this only if the host's logrotate policy must own rotation instead, and
+# disable the built-in rotation by setting P7_SINK_MAX_BYTES=0.
+#
+# Phase 8.3.1 correction: the verified Ubuntu host has no 'deploy' account. The
+# monitor runs as root because the backup disk is root:root 0700, so host-side
+# rotation of its sink must also run as root until a dedicated account is
+# approved. This template remains inactive unless separately installed.
+/var/lib/clinic-monitor/alerts.jsonl {
+    rotate 5
+    size 1M
+    missingok
+    notifempty
+    copytruncate
+    su root root
+    create 0640 root root
+}

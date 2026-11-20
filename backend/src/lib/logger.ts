@@ -71,6 +71,13 @@ const SAFE_KEYS = new Set([
 const SENSITIVE_KEY =
   /(pass|pwd|secret|token|cookie|authoriz|credential|api[_-]?key|apikey|phone|mobile|telephone|patient|name|report|content|body|html|payload|query|header|jwt|session|key)/i;
 
+// Valid UUIDs are correlation identifiers, not PHI. Protect them across every
+// text pass so the phone scrubbing below cannot consume their digit groups.
+const UUID_PATTERN =
+  /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g;
+const UUID_TOKEN_START = '\u0000P72UUID';
+const UUID_TOKEN_END = '\u0000';
+
 const SCRUBBERS: Array<[RegExp, string]> = [
   [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[REDACTED_JWT]'],
   [/\b(?:sk_live|sk_test|AKIA|ghp_|gho_|xoxb-|xoxp-)[A-Za-z0-9_-]{6,}/g, '[REDACTED_SECRET]'],
@@ -84,17 +91,25 @@ const SCRUBBERS: Array<[RegExp, string]> = [
 ];
 
 function scrubText(input: string): string {
-  let out = input;
+  const uuids: string[] = [];
+  let out = input.replace(UUID_PATTERN, (uuid) => {
+    uuids.push(uuid);
+    return `${UUID_TOKEN_START}${uuids.length - 1}${UUID_TOKEN_END}`;
+  });
   for (const [pattern, replacement] of SCRUBBERS) {
     out = out.replace(pattern, replacement);
   }
   // Phone-like runs: only redact when the run really contains >= 9 digits,
-  // so UTC timestamps such as 2026-11-20 are left intact.
+  // so UTC timestamps such as 2026-11-20 are left intact. Valid UUIDs were
+  // tokenised above, including all-digit v4-like values.
   out = out.replace(/\+?[0-9][0-9().\s-]{6,}[0-9]/g, (match) => {
     const digits = match.replace(/\D/g, '').length;
     return digits >= 9 ? '[REDACTED_PHONE]' : match;
   });
-  return out;
+  return out.replace(
+    /\u0000P72UUID(\d+)\u0000/g,
+    (token, index: string) => uuids[Number(index)] ?? '',
+  );
 }
 
 function primitive(value: unknown, depth: number): unknown {
