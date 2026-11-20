@@ -288,7 +288,7 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test('quick actions: appointment actions 1-5', async (t) => {
+test('quick actions: appointment and statistics actions 1-13', async (t) => {
   const today = clinicDateString();
 
   await t.test('Action 1 groups today by doctor and matches the agenda grid', async () => {
@@ -859,5 +859,81 @@ test('quick actions: appointment actions 1-5', async (t) => {
     assert.ok(week.body.days.every((day: any) => day.slots.every(
       (slot: any) => slot.doctor.id === alphaId,
     )));
+  });
+
+  await t.test('Actions 10-13 expose the statistics summaries', async () => {
+    const dailyList = await api('/quick-actions/appointments/today', { token: adminToken });
+    assert.equal(dailyList.status, 200, JSON.stringify(dailyList.body));
+
+    const todaySummary = await api('/quick-actions/appointments/today-summary', {
+      token: adminToken,
+    });
+    assert.equal(todaySummary.status, 200, JSON.stringify(todaySummary.body));
+    assert.equal(todaySummary.body.date, today);
+    assert.equal(todaySummary.body.timezone, 'Africa/Cairo');
+    assert.equal(todaySummary.body.total, dailyList.body.total);
+    assert.equal(
+      Object.values(todaySummary.body.byStatus).reduce(
+        (sum: number, count: any) => sum + count,
+        0,
+      ),
+      todaySummary.body.total,
+    );
+
+    const queue = await api('/quick-actions/queue/status', { token: adminToken });
+    assert.equal(queue.status, 200, JSON.stringify(queue.body));
+    assert.equal(queue.body.date, today);
+    for (const key of ['waiting', 'called', 'inExam', 'skipped', 'done']) {
+      assert.equal(typeof queue.body[key], 'number', key);
+      assert.ok(queue.body[key] >= 0, key);
+    }
+
+    const served = await api('/quick-actions/patients/today-summary', {
+      token: adminToken,
+    });
+    assert.equal(served.status, 200, JSON.stringify(served.body));
+    assert.equal(served.body.date, today);
+    const distinctPatients = new Set(
+      dailyList.body.appointments
+        .map((row: any) => row.patient?.id)
+        .filter((id: unknown): id is string => typeof id === 'string'),
+    );
+    assert.equal(served.body.total, distinctPatients.size);
+
+    const weekly = await api('/quick-actions/appointments/week-summary', {
+      token: adminToken,
+    });
+    assert.equal(weekly.status, 200, JSON.stringify(weekly.body));
+    const weekStart = expectedSaturday(today);
+    assert.equal(weekly.body.weekStart, weekStart);
+    assert.equal(weekly.body.weekEnd, addDays(weekStart, 6));
+    assert.ok(weekly.body.total >= todaySummary.body.total);
+    assert.equal(
+      Object.values(weekly.body.byStatus).reduce(
+        (sum: number, count: any) => sum + count,
+        0,
+      ),
+      weekly.body.total,
+    );
+
+    const appointmentPaths = [
+      '/quick-actions/appointments/today-summary',
+      '/quick-actions/appointments/week-summary',
+    ];
+    for (const path of appointmentPaths) {
+      assert.equal((await api(path, { token: limitedToken })).status, 200, path);
+      assert.equal((await api(path, { token: noAccessToken })).status, 403, path);
+      assert.equal((await api(path)).status, 401, path);
+    }
+
+    const protectedPaths = [
+      '/quick-actions/queue/status',
+      '/quick-actions/patients/today-summary',
+    ];
+    for (const path of protectedPaths) {
+      assert.equal((await api(path, { token: limitedToken })).status, 403, path);
+      assert.equal((await api(path, { token: noAccessToken })).status, 403, path);
+      assert.equal((await api(path)).status, 401, path);
+    }
   });
 });

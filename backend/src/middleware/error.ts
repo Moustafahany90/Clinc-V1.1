@@ -4,6 +4,7 @@ import { MulterError } from 'multer';
 import { ZodError } from 'zod';
 import { AppError } from '../lib/errors.js';
 import { env } from '../config/env.js';
+import { log, safeRoute } from '../lib/logger.js';
 
 export const notFoundHandler: RequestHandler = (req, res) => {
   res.status(404).json({
@@ -85,21 +86,16 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
 
   // Never log request bodies, query strings, or raw error messages: they can
   // contain PHI, credentials or tokens. Keep just enough for correlation.
-  // eslint-disable-next-line no-console
-  console.error(
-    JSON.stringify({
-      level: 'error',
-      event: 'request.failed',
-      requestId: req.requestId ?? null,
-      method: req.method,
-      path: req.path,
-      error: (err as Error)?.name ?? 'Error',
-      errorCode:
-        typeof (err as { code?: unknown }).code === 'string'
-          ? (err as { code: string }).code
-          : null,
-    }),
-  );
+  log('error', 'request.failed', {
+    requestId: req.requestId ?? null,
+    method: req.method,
+    route: safeRoute(req),
+    error: (err as Error)?.name ?? 'Error',
+    errorCode:
+      typeof (err as { code?: unknown }).code === 'string'
+        ? (err as { code: string }).code
+        : null,
+  });
   res.status(500).json({
     error: {
       code: 'INTERNAL',

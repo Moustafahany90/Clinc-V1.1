@@ -67,6 +67,10 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    # Evolution is a mandatory stack service but intentionally NOT a startup
+    # dependency: a slow or unhealthy provider must never block the clinic
+    # backend. The backend's bounded retries in src/lib/whatsapp.ts handle brief
+    # unavailability, and WhatsApp calls surface clear WHATSAPP_* errors.
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 4000
@@ -82,12 +86,17 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
       TRUST_PROXY: ${TRUST_PROXY:-1}
+      # Structured operational log level. `debug` is clamped to `info` in production.
+      LOG_LEVEL: ${LOG_LEVEL:-info}
       BODY_LIMIT: ${BODY_LIMIT:-2mb}
       UPLOAD_DIR: /app/storage/uploads
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
       EVOLUTION_API_ENABLED: ${EVOLUTION_API_ENABLED:-false}
       EVOLUTION_API_URL: ${EVOLUTION_API_URL:-http://evolution:8080}
-      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      # No fallback: a missing key must fail Compose configuration, not silently
+      # authenticate with a committed value. The same variable configures the
+      # evolution service below.
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?set EVOLUTION_API_KEY in .env}
       EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-ultrasound_clinic}
       EVOLUTION_API_TIMEOUT_MS: ${EVOLUTION_API_TIMEOUT_MS:-30000}
       EVOLUTION_DEFAULT_COUNTRY_CODE: ${EVOLUTION_DEFAULT_COUNTRY_CODE:-20}
@@ -132,6 +141,10 @@ services:
     logging: *default-logging
 
   evolution:
+    # Mandatory core infrastructure: WhatsApp delivery provider (Evolution API).
+    # Starts with the default `docker compose up -d`; no Compose profile is used.
+    # Internal only: reachable by the backend at http://evolution:8080 on
+    # clinic_net, with no host port published.
     image: evoapicloud/evolution-api:v2.3.7
     restart: unless-stopped
     depends_on:
@@ -142,7 +155,8 @@ services:
       SERVER_PORT: 8080
       SERVER_URL: http://evolution:8080
       AUTHENTICATION_TYPE: apikey
-      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      # Auth is always enabled; the key is required and never hardcoded/logged.
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?set EVOLUTION_API_KEY in .env}
       AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
       DATABASE_PROVIDER: postgresql
       DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:-clinic_app}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ultrasound_clinic}?schema=evolution
@@ -150,8 +164,17 @@ services:
       CACHE_REDIS_ENABLED: "false"
       CACHE_LOCAL_ENABLED: "true"
       LOG_LEVEL: "ERROR,WARN,INFO"
-    ports:
-      - "127.0.0.1:8085:8080"
+    healthcheck:
+      # v2.3.7 has no /health route. GET /manager/ is a static, unauthenticated
+      # route returning HTTP 200. Prefer it over GET / because the latter
+      # awaits a live WhatsApp-Web version fetch that can stall in locked-down
+      # networks (it has a fallback, but only after the fetch fails/times out).
+      test:
+        ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/manager/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
     volumes:
       - evolution_instances:/evolution/instances
     networks:

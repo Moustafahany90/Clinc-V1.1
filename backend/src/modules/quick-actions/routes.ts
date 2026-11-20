@@ -15,7 +15,11 @@ import {
   getAvailableAppointmentsToday,
   getDoctorSchedule,
   getNextAvailableAppointment,
+  getPatientsServedToday,
+  getQueueStatusToday,
   getTodayAppointments,
+  getTodayAppointmentsSummary,
+  getWeeklyAppointmentsSummary,
   getWeeklyAvailability,
 } from './service.js';
 
@@ -122,5 +126,45 @@ quickActionsRouter.get(
     const me = currentUser(req);
     const query = parseQuery(availabilityQuery, req);
     res.json(await getNextAvailableAppointment(me, query));
+  }),
+);
+
+/** Action 10 - today's appointments summary. */
+quickActionsRouter.get(
+  '/appointments/today-summary',
+  requirePermission('APPOINTMENTS_READ'),
+  asyncHandler(async (req, res) => {
+    const me = currentUser(req);
+    res.json(await getTodayAppointmentsSummary(me));
+  }),
+);
+
+/** Action 11 - today's queue status. */
+quickActionsRouter.get(
+  '/queue/status',
+  requirePermission('QUEUE_READ'),
+  asyncHandler(async (req, res) => {
+    const me = currentUser(req);
+    res.json(await getQueueStatusToday(me));
+  }),
+);
+
+/** Action 12 - patients served today. */
+quickActionsRouter.get(
+  '/patients/today-summary',
+  requirePermission('PATIENTS_READ'),
+  asyncHandler(async (req, res) => {
+    const me = currentUser(req);
+    res.json(await getPatientsServedToday(me));
+  }),
+);
+
+/** Action 13 - weekly appointments summary. */
+quickActionsRouter.get(
+  '/appointments/week-summary',
+  requirePermission('APPOINTMENTS_READ'),
+  asyncHandler(async (req, res) => {
+    const me = currentUser(req);
+    res.json(await getWeeklyAppointmentsSummary(me));
   }),
 );

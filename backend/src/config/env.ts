@@ -31,6 +31,8 @@ const schema = z.object({
   COOKIE_DOMAIN: z.string().optional().default(''),
 
   TRUST_PROXY: int(1, 0, 10),
+  /** Operational log level. `debug` is clamped to `info` in production by the logger. */
+  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   BODY_LIMIT: z.string().default('2mb'),
   UPLOAD_DIR: z.string().default('./storage/uploads'),
   MAX_UPLOAD_MB: int(25, 1, 200),

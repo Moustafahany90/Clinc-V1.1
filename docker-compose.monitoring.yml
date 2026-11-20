@@ -1,0 +1,44 @@
+# Optional Phase 7 monitoring overlay — DISABLED BY DEFAULT.
+#
+# The service below is behind the `monitoring` Compose profile, so plain
+# `docker compose up -d` is unchanged. To opt in explicitly:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml \
+#     --profile monitoring up -d clinic-monitor
+#
+# It runs read-only checks and writes JSONL alerts to a local sink. No alert
+# channel, credential, or external network destination is configured here.
+# Alert-channel selection is approval-gated (baseline B9).
+
+services:
+  clinic-monitor:
+    profiles: ["monitoring"]
+    image: bash:5-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: ["bash", "/app/scripts/p7-monitor.sh", "--loop"]
+    environment:
+      P7_STATE_DIR: /var/lib/clinic-monitor
+      P7_ALERT_SINK: /var/lib/clinic-monitor/alerts.jsonl
+      P7_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-ultrasound-clinic}
+      P7_BACKUP_DIR: ${P7_BACKUP_DIR:-/mnt/clinic-backups/backups}
+      P7_BACKUP_MOUNT: ${P7_BACKUP_MOUNT:-/mnt/clinic-backups}
+      P7_MAX_AGE_HOURS: ${P7_BACKUP_MAX_AGE_HOURS:-26}
+      P7_INTERVAL_SEC: ${P7_MONITOR_INTERVAL_SEC:-300}
+      P7_ALERT_REPEAT_SEC: ${P7_ALERT_REPEAT_SEC:-3600}
+      TZ: ${APP_TIMEZONE:-Africa/Cairo}
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - p7_monitor_state:/var/lib/clinic-monitor
+      # Read-only Docker socket: checks use `docker ps`/`inspect` only.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - clinic_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  p7_monitor_state: {}

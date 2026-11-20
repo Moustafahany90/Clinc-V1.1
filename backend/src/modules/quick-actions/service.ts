@@ -397,7 +397,10 @@ export async function getNextAvailableAppointment(
           slot: first.slot,
         }
       : null,
-  }
+    message: first
+      ? null
+      : `No availability in the next ${NEXT_AVAILABLE_HORIZON_DAYS} days.`,
+  };
 }
 
 
@@ -410,10 +413,12 @@ export interface TodayAppointmentsSummaryResponse {
 }
 
 export async function getTodayAppointmentsSummary(me: AuthUser) {
+  const doctorId = scopedDoctorId(me);
   const today = clinicDateString();
   const range = clinicDayRange(today);
   const appointments = await prisma.appointment.findMany({
     where: {
+      ...(doctorId ? { doctorId } : {}),
       startAt: { gte: range.start, lt: range.end },
     },
     select: { status: true },
@@ -452,11 +457,13 @@ export interface QueueStatusTodayResponse {
 }
 
 export async function getQueueStatusToday(me: AuthUser) {
+  const doctorId = scopedDoctorId(me);
   const today = clinicDateString();
   const queueEntries = await prisma.queueEntry.groupBy({
     by: ['status'],
     where: {
       queueDate: new Date(`${today}T00:00:00.000Z`),
+      ...(doctorId ? { doctorId } : {}),
     },
     _count: { _all: true },
   });
@@ -489,15 +496,17 @@ export interface PatientsServedTodayResponse {
 }
 
 export async function getPatientsServedToday(me: AuthUser) {
+  const doctorId = scopedDoctorId(me);
   const today = clinicDateString();
   const range = clinicDayRange(today);
   const appointments = await prisma.appointment.findMany({
     where: {
+      ...(doctorId ? { doctorId } : {}),
       startAt: { gte: range.start, lt: range.end },
     },
-    select: { patient: true },
+    select: { patientId: true },
   });
-  const patientIds = new Set(appointments.map((appt) => appt.patient.id));
+  const patientIds = new Set(appointments.map((appt) => appt.patientId));
   return {
     date: today,
     timezone: (await getClinicSettings()).timezone,
@@ -515,11 +524,15 @@ export interface WeeklyAppointmentsSummaryResponse {
 }
 
 export async function getWeeklyAppointmentsSummary(me: AuthUser) {
+  const doctorId = scopedDoctorId(me);
   const today = clinicDateString();
   const week = clinicWeekRange(today);
+  const weekRange = clinicDayRange(week.start);
+  const lastDayRange = clinicDayRange(week.end);
   const appointments = await prisma.appointment.findMany({
     where: {
-      startAt: { gte: week.start, lt: week.end },
+      ...(doctorId ? { doctorId } : {}),
+      startAt: { gte: weekRange.start, lt: lastDayRange.end },
     },
     select: { status: true },
   });

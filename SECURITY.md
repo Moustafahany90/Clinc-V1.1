@@ -42,8 +42,9 @@ clean as evidence that the old values are safe.
    Set `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET`, then restart the backend.
    All existing sessions are invalidated. Never reuse one value for both.
 5. **WhatsApp credentials** — revoke the exposed Evolution API key, issue a
-   new one, set `EVOLUTION_API_KEY` to the same value used by the `evolution`
-   service, restart the backend, and verify a synthetic delivery. Rotate the
+   new one, set `EVOLUTION_API_KEY` (the same value configures the `evolution`
+   service and the backend client), then restart the whole stack with
+   `docker compose up -d` and verify a synthetic delivery. Rotate the
    key immediately if it was ever pasted into a screenshot, chat or log; never
    reuse a key from another clinic or project.
 6. **TLS** — revoke/reissue any exposed certificate or private key. Caddy

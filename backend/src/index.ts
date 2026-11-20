@@ -3,6 +3,7 @@ import { env } from './config/env.js';
 import { prisma } from './lib/prisma.js';
 import { getClinicSettings } from './lib/clinic.js';
 import { clinicTimezoneName } from './lib/time.js';
+import { log } from './lib/logger.js';
 import { ensureStorage } from './modules/files/routes.js';
 
 async function main(): Promise<void> {
@@ -14,21 +15,16 @@ async function main(): Promise<void> {
 
   const app = createApp();
   const server = app.listen(env.PORT, () => {
-    // eslint-disable-next-line no-console
-    console.log(
-      JSON.stringify({
-        level: 'info',
-        message: 'api listening',
-        port: env.PORT,
-        env: env.NODE_ENV,
-        timezone: clinicTimezoneName(),
-      }),
-    );
+    log('info', 'api.listening', {
+      message: 'api listening',
+      port: env.PORT,
+      environment: env.NODE_ENV,
+      timezone: clinicTimezoneName(),
+    });
   });
 
   const shutdown = async (signal: string) => {
-    // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ level: 'info', message: 'shutting down', signal }));
+    log('info', 'api.shutting_down', { message: 'shutting down', signal });
     server.close(() => undefined);
     await prisma.$disconnect().catch(() => undefined);
     setTimeout(() => process.exit(0), 5_000).unref();
@@ -39,17 +35,13 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error(
-    JSON.stringify({
-      level: 'fatal',
-      message: 'failed to start API',
-      error: (err as Error)?.name ?? 'Error',
-      errorCode:
-        typeof (err as { code?: unknown }).code === 'string'
-          ? (err as { code: string }).code
-          : null,
-    }),
-  );
+  log('fatal', 'api.start_failed', {
+    message: 'failed to start API',
+    error: (err as Error)?.name ?? 'Error',
+    errorCode:
+      typeof (err as { code?: unknown }).code === 'string'
+        ? (err as { code: string }).code
+        : null,
+  });
   process.exit(1);
 });

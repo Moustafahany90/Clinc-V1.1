@@ -43,7 +43,7 @@ async function allTimePosition() {
     allocatedMinor,
     outstandingMinor,
     unallocatedMinor,
-    /** Positive: money held for the patient. Negative: patient owes extra. */
+    /** Positive: patient owes the clinic. Negative: unallocated patient credit. */
     balanceMinor: outstandingMinor - unallocatedMinor,
   };
 }
@@ -379,7 +379,7 @@ financialRouter.get(
           String(row.amountMinor),
           CLINIC_CURRENCY,
         ]
-          .map(csvCell)
+          .map((value, index) => (index === 8 ? csvNumber(value) : csvCell(value)))
           .join(','),
       );
     }
@@ -398,4 +398,9 @@ function csvCell(value: string): string {
   // Guard against CSV formula injection in spreadsheet software.
   const safe = /^[=+\-@]/.test(value) ? `'${value}` : value;
   return `"${safe.replace(/"/g, '""')}"`;
+}
+
+/** Amounts are validated integers from the database; never escape their sign. */
+function csvNumber(value: string): string {
+  return `"${value}"`;
 }

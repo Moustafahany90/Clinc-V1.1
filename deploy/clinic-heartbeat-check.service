@@ -1,0 +1,21 @@
+# Phase 7 template -- NOT installed by the audit.
+# This runs from a separate scheduler so a stopped monitor is still detected.
+[Unit]
+Description=Clinic Phase 7 monitor heartbeat (dead-man's switch) check
+Documentation=file:/opt/clinic/Clinc-V1.1/docs/monitoring-runbook.md
+
+[Service]
+Type=oneshot
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/clinic/Clinc-V1.1
+EnvironmentFile=-/etc/clinic/monitor.env
+ExecStart=/usr/bin/bash scripts/p7-check-heartbeat.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/clinic-monitor
+
+[Install]
+WantedBy=multi-user.target

@@ -8,6 +8,6 @@
 - Refunds: Money returned to patients. Capped at payment.amount - alreadyRefunded. Tracked separately.
 - Deposits/Credit: Unallocated payments create patient credit (unallocatedMinor). This is not counted as "collected" in a way that double-counts against outstanding balances.
 - Expenses: Clinic costs, not linked to patients. Can be VOIDED with reason (original entry preserved).
-- Ledger: /patients/:id/ledger shows all financial activity. Outstanding = charges not covered by allocated payments. Balance can be positive (credit held) or negative (amount owed).
+- Ledger: /patients/:id/ledger shows all financial activity. Outstanding = charges not covered by allocated payments. Balance = outstanding - unallocated, so positive means the patient owes the clinic and negative means unallocated credit held for the patient.
 - Reports: Daily/monthly reports show charges, payments, refunds, expenses separately with clear totals (collected, billed, net cash).
 - Accounting export: CSV export with one row per charge/payment/refund/expense, amounts in piasters with currency column for reconciliation.

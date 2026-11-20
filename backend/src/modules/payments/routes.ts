@@ -246,6 +246,16 @@ paymentsRouter.post(
     const me = currentUser(req);
 
     const refund = await prisma.$transaction(async (tx) => {
+      // Resolve the patient first so the ledger lock can be taken before the
+      // payment and its refunds are read. Reading a payment before the lock
+      // lets two concurrent refunds both see the pre-refund total.
+      const owner = await tx.payment.findUnique({
+        where: { id },
+        select: { patientId: true },
+      });
+      if (!owner) throw notFound('Payment not found');
+      await lockLedger(tx, owner.patientId);
+
       const payment = await tx.payment.findUnique({
         where: { id },
         include: { refunds: { select: { amountMinor: true } } },
@@ -253,7 +263,6 @@ paymentsRouter.post(
       if (!payment) throw notFound('Payment not found');
       if (payment.status !== 'COMPLETED') throw badRequest('This payment cannot be refunded.');
 
-      await lockLedger(tx, payment.patientId);
       const alreadyRefunded = payment.refunds.reduce((sum, r) => sum + r.amountMinor, 0);
       const refundable = payment.amountMinor - alreadyRefunded;
       if (payload.amountMinor > refundable) {
@@ -385,19 +394,30 @@ paymentsRouter.post(
       req,
     );
 
-    const charge = await prisma.charge.findUnique({
-      where: { id },
-      include: { allocations: true },
-    });
-    if (!charge) throw notFound('Charge not found');
-    if (charge.status === 'VOID') throw badRequest('This charge is already void.');
-    if (charge.allocations.length > 0) {
-      throw badRequest('Refund or reallocate the payments on this charge before voiding it.');
-    }
+    const charge = await prisma.$transaction(async (tx) => {
+      const existing = await tx.charge.findUnique({
+        where: { id },
+        select: { patientId: true },
+      });
+      if (!existing) throw notFound('Charge not found');
+      await lockLedger(tx, existing.patientId);
 
-    const updated = await prisma.charge.update({
-      where: { id },
-      data: { status: 'VOID', voidReason: payload.reason, voidedAt: new Date() },
+      // Re-read under the ledger lock: a payment allocation that committed
+      // while this request was queued must be visible before deciding to void.
+      const locked = await tx.charge.findUnique({
+        where: { id },
+        include: { allocations: true },
+      });
+      if (!locked) throw notFound('Charge not found');
+      if (locked.status === 'VOID') throw badRequest('This charge is already void.');
+      if (locked.allocations.length > 0) {
+        throw badRequest('Refund or reallocate the payments on this charge before voiding it.');
+      }
+
+      return tx.charge.update({
+        where: { id },
+        data: { status: 'VOID', voidReason: payload.reason, voidedAt: new Date() },
+      });
     });
 
     await auditFromRequest(req, {
@@ -408,6 +428,6 @@ paymentsRouter.post(
       metadata: { reason: payload.reason, amountMinor: charge.amountMinor },
     });
 
-    res.json({ charge: updated });
+    res.json({ charge });
   }),
 );
