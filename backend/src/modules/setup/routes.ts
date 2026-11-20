@@ -99,6 +99,27 @@ setupRouter.post(
       throw badRequest(strength.message ?? 'Choose a stronger password.');
     }
 
+    // Mirror the settings working-hours rules here: the DB CHECKs added in
+    // Phase M would otherwise turn a wizard typo into a 500 instead of a 400.
+    const seenDays = new Set<number>();
+    for (const day of payload.workingHours ?? []) {
+      if (seenDays.has(day.dayOfWeek)) throw badRequest('Each weekday can only appear once.');
+      seenDays.add(day.dayOfWeek);
+      if (day.isOpen && day.openMinute >= day.closeMinute) {
+        throw badRequest('Opening time must be before closing time.');
+      }
+      if (
+        day.isOpen &&
+        day.breakStartMinute != null &&
+        day.breakEndMinute != null &&
+        (day.breakStartMinute >= day.breakEndMinute ||
+          day.breakStartMinute < day.openMinute ||
+          day.breakEndMinute > day.closeMinute)
+      ) {
+        throw badRequest('The break must fall inside the opening hours.');
+      }
+    }
+
     const passwordHash = await hashPassword(payload.admin.password);
 
     const result = await prisma.$transaction(async (tx) => {
