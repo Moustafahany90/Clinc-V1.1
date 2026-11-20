@@ -11,31 +11,25 @@ import {
   FilterBar,
   QuickActionResult,
   RefreshButton,
-  ServiceFilter,
   doctorName,
 } from './shared';
 
 /** Action 5 — the earliest open slot inside the 60-day horizon. */
 export function NextAvailablePanel() {
   const { user } = useAuth();
-  const { doctors, services, timezone } = useClinic();
+  const { doctors, timezone } = useClinic();
   const isDoctor = user?.role === 'DOCTOR';
   const [doctorId, setDoctorId] = useState(isDoctor ? (user?.id ?? '') : '');
-  const [serviceId, setServiceId] = useState('');
 
   const state = useQuickAction(
-    (signal) =>
-      fetchNextAvailable(
-        { doctorId: doctorId || undefined, serviceId: serviceId || undefined },
-        signal,
-      ),
-    { deps: [doctorId, serviceId] },
+    (signal) => fetchNextAvailable({ doctorId: doctorId || undefined }, signal),
+    { deps: [doctorId] },
   );
 
   return (
     <SectionCard
       title="Next available appointment"
-      description="The earliest open slot for the chosen doctor or service, searched up to 60 days ahead."
+      description="The earliest open slot for the chosen doctor, searched up to 60 days ahead."
       icon={Zap}
       action={<RefreshButton state={state} />}
       bodyClassName="space-y-4"
@@ -44,7 +38,6 @@ export function NextAvailablePanel() {
         {!isDoctor && (
           <DoctorFilter doctors={doctors} value={doctorId} onChange={setDoctorId} />
         )}
-        <ServiceFilter services={services} value={serviceId} onChange={setServiceId} />
       </FilterBar>
 
       <QuickActionResult state={state} loadingLabel="Searching the next 60 days…">
@@ -102,7 +95,7 @@ export function NextAvailablePanel() {
                 title={`No availability in the next ${data.horizonDays} days`}
                 description={
                   data.message ??
-                  'Try another doctor or service, or extend the schedule from clinic settings.'
+                  'Try another doctor or extend the schedule from clinic settings.'
                 }
               />
             )}

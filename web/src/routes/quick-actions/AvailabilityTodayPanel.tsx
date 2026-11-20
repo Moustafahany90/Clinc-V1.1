@@ -20,7 +20,6 @@ import {
   OpeningHoursText,
   QuickActionResult,
   RefreshButton,
-  ServiceFilter,
   SlotChips,
   doctorName,
 } from './shared';
@@ -28,18 +27,13 @@ import {
 /** Action 1 — available appointment slots today, grouped by doctor. */
 export function AvailabilityTodayPanel() {
   const { user } = useAuth();
-  const { doctors, services, timezone } = useClinic();
+  const { doctors, timezone } = useClinic();
   const isDoctor = user?.role === 'DOCTOR';
   const [doctorId, setDoctorId] = useState(isDoctor ? (user?.id ?? '') : '');
-  const [serviceId, setServiceId] = useState('');
 
   const state = useQuickAction(
-    (signal) =>
-      fetchTodayAvailability(
-        { doctorId: doctorId || undefined, serviceId: serviceId || undefined },
-        signal,
-      ),
-    { deps: [doctorId, serviceId] },
+    (signal) => fetchTodayAvailability({ doctorId: doctorId || undefined }, signal),
+    { deps: [doctorId] },
   );
 
   return (
@@ -54,7 +48,6 @@ export function AvailabilityTodayPanel() {
         {!isDoctor && (
           <DoctorFilter doctors={doctors} value={doctorId} onChange={setDoctorId} />
         )}
-        <ServiceFilter services={services} value={serviceId} onChange={setServiceId} />
       </FilterBar>
 
       <QuickActionResult state={state} loadingLabel="Checking today's availability…">
@@ -109,7 +102,7 @@ export function AvailabilityTodayPanel() {
                         <p className="text-[13px] font-semibold text-ink-900">
                           {doctorName(row.doctor)}
                         </p>
-                        <OpeningHoursText hours={row.openingHours} />
+                        {row.openingHours.isOpen && <OpeningHoursText hours={row.openingHours} />}
                       </div>
                       <Badge
                         tone={row.availableCount > 0 ? 'success' : row.isOpen ? 'warning' : 'muted'}

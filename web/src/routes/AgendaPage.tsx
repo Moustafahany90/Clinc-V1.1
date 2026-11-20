@@ -48,6 +48,12 @@ export function AgendaPage() {
   const [date, setDate] = useState(todayInZone(timezone));
   const [doctorId, setDoctorId] = useState(user?.role === 'DOCTOR' ? user.id : '');
   const [newOpen, setNewOpen] = useState(false);
+  const [initialTime, setInitialTime] = useState('');
+
+  function openNew(time = '') {
+    setInitialTime(time);
+    setNewOpen(true);
+  }
 
   const state = useAsyncData<Agenda>(
     async () => {
@@ -93,7 +99,7 @@ export function AgendaPage() {
         title="Agenda"
         description="Day schedule, available slots and booking controls for every doctor."
         actions={
-          <Button onClick={() => setNewOpen(true)}>
+          <Button onClick={() => openNew()}>
             <CalendarPlus className="h-4 w-4" aria-hidden />
             New appointment
           </Button>
@@ -220,7 +226,7 @@ export function AgendaPage() {
                         key={`${slot.start}-${slot.minute}`}
                         type="button"
                         onClick={() => {
-                          if (slot.available) setNewOpen(true);
+                          if (slot.available) openNew(minutesToLabel(slot.minute, false));
                         }}
                         disabled={!slot.available}
                         title={slot.available ? 'Book this time' : 'Already booked'}
@@ -257,7 +263,7 @@ export function AgendaPage() {
                       : 'Book an appointment or choose a doctor to see available slots.'
                   }
                   action={
-                    <Button onClick={() => setNewOpen(true)}>
+                    <Button onClick={() => openNew()}>
                       <Plus className="h-4 w-4" aria-hidden />
                       New appointment
                     </Button>
@@ -363,6 +369,7 @@ export function AgendaPage() {
         onOpenChange={setNewOpen}
         initialDate={date}
         initialDoctorId={doctorId || undefined}
+        initialTime={initialTime}
         onSaved={() => state.reload()}
       />
     </div>

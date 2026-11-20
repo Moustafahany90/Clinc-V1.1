@@ -91,11 +91,11 @@ export function TodayRevenuePanel() {
                       {data.byMethod.map((row) => (
                         <TR key={row.key}>
                           <TD>{row.label}</TD>
-                          <TD className="tabular">{row.paymentsCount}</TD>
-                          <TD className="tabular">
+                          <TD className="tabular text-right">{row.paymentsCount}</TD>
+                          <TD className="tabular text-right">
                             {formatMoney(row.refundsMinor, data.currency)}
                           </TD>
-                          <TD className="tabular font-semibold">
+                          <TD className="tabular text-right font-semibold">
                             <Badge
                               tone={
                                 row.netMinor >= 0 ? 'success' : 'danger'

@@ -2,7 +2,6 @@ import { useState } from 'react';
 import {
   ArrowDownRight,
   ArrowUpRight,
-  BarChart3,
   CreditCard,
   Download,
   Printer,
@@ -16,14 +15,13 @@ import { useClinic } from '../lib/clinic';
 import { useAsyncData } from '../lib/hooks';
 import {
   addDays,
-  addMonths,
   endOfMonth,
   formatDateOnly,
-  formatMonthLabel,
   startOfMonth,
   todayInZone,
 } from '../lib/format';
 import { formatMoney } from '../lib/money';
+import { RangePresets } from '../components/RangePresets';
 import { useToast } from '../components/toast';
 import {
   Alert,
@@ -36,7 +34,6 @@ import {
   Input,
   LoadingBlock,
   PageHeader,
-  Select,
   Stat,
   Table,
   TableWrap,
@@ -50,6 +47,9 @@ import {
   TabsList,
   TabsTrigger,
 } from '../components/ui';
+
+/** Sentinel start date for the "everything to date" export preset. */
+const ALL_TIME_FROM = '2000-01-01';
 
 interface MoneyPosition {
   chargesMinor: number;
@@ -84,30 +84,6 @@ interface DailyFigures {
   position: MoneyPosition;
 }
 
-interface MonthlyFigures {
-  year: number;
-  month: number;
-  currency: string;
-  from: string;
-  to: string;
-  days: {
-    date: string;
-    paymentsMinor: number;
-    refundsMinor: number;
-    expensesMinor: number;
-    billedMinor: number;
-    netCashMinor: number;
-  }[];
-  totals: {
-    paymentsMinor: number;
-    refundsMinor: number;
-    expensesMinor: number;
-    billedMinor: number;
-    collectedMinor: number;
-    netCashMinor: number;
-  };
-}
-
 interface ExportPreview {
   from: string;
   to: string;
@@ -124,19 +100,6 @@ interface ExportPreview {
   columns: string[];
 }
 
-function monthOptions(count = 18) {
-  const today = todayInZone();
-  const options: { value: string; label: string }[] = [];
-  for (let index = 0; index < count; index += 1) {
-    const date = addMonths(startOfMonth(today), -index);
-    options.push({
-      value: date.slice(0, 7),
-      label: formatMonthLabel(date),
-    });
-  }
-  return options;
-}
-
 export function FinancePage() {
   const { hasPermission } = useAuth();
   const { currency, timezone } = useClinic();
@@ -146,13 +109,9 @@ export function FinancePage() {
   const today = todayInZone(timezone);
   const [tab, setTab] = useState('daily');
   const [dailyDate, setDailyDate] = useState(today);
-  const [month, setMonth] = useState(startOfMonth(today).slice(0, 7));
   const [exportFrom, setExportFrom] = useState(startOfMonth(today));
   const [exportTo, setExportTo] = useState(today);
   const [exporting, setExporting] = useState(false);
-
-  const months = monthOptions();
-  const [exportYear, exportMonth] = month.split('-').map((part) => Number(part));
 
   const dailyState = useAsyncData<DailyFigures>(
     async () =>
@@ -163,17 +122,6 @@ export function FinancePage() {
       ).data,
     [dailyDate],
     tab === 'daily',
-  );
-
-  const monthlyState = useAsyncData<MonthlyFigures>(
-    async () =>
-      (
-        await api.get<MonthlyFigures>('/financial-reports/monthly', {
-          params: { year: exportYear, month: exportMonth },
-        })
-      ).data,
-    [exportYear, exportMonth],
-    tab === 'monthly',
   );
 
   const exportState = useAsyncData<ExportPreview>(
@@ -200,7 +148,6 @@ export function FinancePage() {
   }
 
   const daily = dailyState.data;
-  const monthly = monthlyState.data;
   const preview = exportState.data;
 
   return (
@@ -215,17 +162,9 @@ export function FinancePage() {
               variant="secondary"
               onClick={() => {
                 const targetFrom =
-                  tab === 'daily'
-                    ? dailyDate
-                    : tab === 'monthly' && monthly
-                      ? monthly.from
-                      : exportFrom || today;
+                  tab === 'daily' ? dailyDate : exportFrom || today;
                 const targetTo =
-                  tab === 'daily'
-                    ? dailyDate
-                    : tab === 'monthly' && monthly
-                      ? monthly.to
-                      : exportTo || today;
+                  tab === 'daily' ? dailyDate : exportTo || today;
                 window.open(`/finance/print?from=${targetFrom}&to=${targetTo}`, '_blank');
               }}
             >
@@ -281,7 +220,6 @@ export function FinancePage() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="daily">Daily close</TabsTrigger>
-          <TabsTrigger value="monthly">Monthly</TabsTrigger>
           {canExport && <TabsTrigger value="export">Accounting export</TabsTrigger>}
         </TabsList>
 
@@ -323,16 +261,6 @@ export function FinancePage() {
                   </Button>
                 </div>
               </div>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() =>
-                  window.open(`/finance/print?from=${dailyDate}&to=${dailyDate}`, '_blank')
-                }
-              >
-                <Printer className="h-3.5 w-3.5" aria-hidden />
-                Export as PDF (Bill)
-              </Button>
             </div>
           </Card>
 
@@ -460,155 +388,6 @@ export function FinancePage() {
           )}
         </TabsContent>
 
-        <TabsContent value="monthly" className="space-y-4">
-          <Card className="p-4">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div className="flex flex-wrap items-end gap-3">
-                <Field label="Month" className="w-56">
-                  <Select value={month} onChange={(event) => setMonth(event.target.value)}>
-                    {months.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <p className="pb-2 text-[12px] text-ink-500">
-                  {monthly
-                    ? `${formatDateOnly(monthly.from)} → ${formatDateOnly(monthly.to)}`
-                    : 'Loading period…'}
-                </p>
-              </div>
-              {monthly && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() =>
-                    window.open(`/finance/print?from=${monthly.from}&to=${monthly.to}`, '_blank')
-                  }
-                >
-                  <Printer className="h-3.5 w-3.5" aria-hidden />
-                  Export as PDF (Bill)
-                </Button>
-              )}
-            </div>
-          </Card>
-
-          {monthlyState.error && <Alert tone="danger">{monthlyState.error}</Alert>}
-          {monthlyState.loading && !monthly ? (
-            <LoadingBlock label="Loading the month’s figures…" />
-          ) : !monthly ? null : (
-            <>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <Stat
-                  label="Collected"
-                  value={formatMoney(monthly.totals.collectedMinor, currency)}
-                  hint={`${formatMoney(monthly.totals.paymentsMinor, currency)} received`}
-                  icon={ArrowUpRight}
-                  tone="success"
-                />
-                <Stat
-                  label="Refunds"
-                  value={formatMoney(monthly.totals.refundsMinor, currency)}
-                  icon={ArrowDownRight}
-                  tone={monthly.totals.refundsMinor > 0 ? 'danger' : 'neutral'}
-                />
-                <Stat
-                  label="Billed"
-                  value={formatMoney(monthly.totals.billedMinor, currency)}
-                  icon={Receipt}
-                  tone="warning"
-                />
-                <Stat
-                  label="Net cash"
-                  value={formatMoney(monthly.totals.netCashMinor, currency)}
-                  hint={`After ${formatMoney(monthly.totals.expensesMinor, currency)} expenses`}
-                  icon={BarChart3}
-                  tone={monthly.totals.netCashMinor >= 0 ? 'brand' : 'danger'}
-                />
-              </div>
-
-              <Card>
-                <CardHeader
-                  title="Day by day"
-                  description="Only days with activity are listed. Cash figures exclude unpaid charges."
-                  icon={BarChart3}
-                />
-                {monthly.days.length === 0 ? (
-                  <EmptyState
-                    icon={BarChart3}
-                    title="No activity this month"
-                    description="Payments, charges and expenses will appear here."
-                  />
-                ) : (
-                  <TableWrap>
-                    <Table>
-                      <THead>
-                        <TR>
-                          <TH>Date</TH>
-                          <TH className="text-right">Billed</TH>
-                          <TH className="text-right">Payments</TH>
-                          <TH className="text-right">Refunds</TH>
-                          <TH className="text-right">Expenses</TH>
-                          <TH className="text-right">Net cash</TH>
-                        </TR>
-                      </THead>
-                      <TBody>
-                        {monthly.days.map((day) => (
-                          <TR key={day.date}>
-                            <TD className="whitespace-nowrap text-ink-700">
-                              {formatDateOnly(day.date)}
-                            </TD>
-                            <TD className="tabular whitespace-nowrap text-right text-ink-500">
-                              {formatMoney(day.billedMinor, currency)}
-                            </TD>
-                            <TD className="tabular whitespace-nowrap text-right">
-                              {formatMoney(day.paymentsMinor, currency)}
-                            </TD>
-                            <TD className="tabular whitespace-nowrap text-right text-ink-500">
-                              {day.refundsMinor > 0 ? formatMoney(day.refundsMinor, currency) : '—'}
-                            </TD>
-                            <TD className="tabular whitespace-nowrap text-right text-ink-500">
-                              {day.expensesMinor > 0
-                                ? formatMoney(day.expensesMinor, currency)
-                                : '—'}
-                            </TD>
-                            <TD
-                              className={`tabular whitespace-nowrap text-right font-medium ${
-                                day.netCashMinor < 0 ? 'text-clay-700' : ''
-                              }`}
-                            >
-                              {formatMoney(day.netCashMinor, currency)}
-                            </TD>
-                          </TR>
-                        ))}
-                        <TR>
-                          <TD className="font-semibold text-ink-900">Month total</TD>
-                          <TD className="tabular whitespace-nowrap text-right font-semibold">
-                            {formatMoney(monthly.totals.billedMinor, currency)}
-                          </TD>
-                          <TD className="tabular whitespace-nowrap text-right font-semibold">
-                            {formatMoney(monthly.totals.paymentsMinor, currency)}
-                          </TD>
-                          <TD className="tabular whitespace-nowrap text-right font-semibold">
-                            {formatMoney(monthly.totals.refundsMinor, currency)}
-                          </TD>
-                          <TD className="tabular whitespace-nowrap text-right font-semibold">
-                            {formatMoney(monthly.totals.expensesMinor, currency)}
-                          </TD>
-                          <TD className="tabular whitespace-nowrap text-right font-semibold">
-                            {formatMoney(monthly.totals.netCashMinor, currency)}
-                          </TD>
-                        </TR>
-                      </TBody>
-                    </Table>
-                  </TableWrap>
-                )}
-              </Card>
-            </>
-          )}
-        </TabsContent>
-
         {canExport && (
           <TabsContent value="export" className="space-y-4">
             <Card className="p-4">
@@ -639,53 +418,42 @@ export function FinancePage() {
                     <Download className="h-4 w-4" aria-hidden />
                     Download CSV
                   </Button>
-                  <Button
-                    variant="secondary"
-                    disabled={!exportFrom || !exportTo}
-                    onClick={() =>
-                      window.open(`/finance/print?from=${exportFrom}&to=${exportTo}`, '_blank')
-                    }
-                  >
-                    <Printer className="h-4 w-4" aria-hidden />
-                    Export as PDF (Bill)
-                  </Button>
                 </div>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-                <button
-                  type="button"
-                  className="font-medium text-brand-700 hover:text-brand-800"
-                  onClick={() => {
-                    setExportFrom(startOfMonth(today));
-                    setExportTo(today);
-                  }}
-                >
-                  This month to date
-                </button>
-                <span className="text-ink-300">·</span>
-                <button
-                  type="button"
-                  className="font-medium text-brand-700 hover:text-brand-800"
-                  onClick={() => {
-                    const previous = addDays(startOfMonth(today), -1);
-                    setExportFrom(startOfMonth(previous));
-                    setExportTo(endOfMonth(previous));
-                  }}
-                >
-                  Previous month
-                </button>
-                <span className="text-ink-300">·</span>
-                <button
-                  type="button"
-                  className="font-medium text-brand-700 hover:text-brand-800"
-                  onClick={() => {
-                    setExportFrom('');
-                    setExportTo(today);
-                  }}
-                >
-                  Everything to date
-                </button>
-              </div>
+              <RangePresets
+                className="mt-3"
+                presets={[
+                  {
+                    label: 'This month to date',
+                    active: exportFrom === startOfMonth(today) && exportTo === today,
+                    onClick: () => {
+                      setExportFrom(startOfMonth(today));
+                      setExportTo(today);
+                    },
+                  },
+                  {
+                    label: 'Previous month',
+                    active:
+                      exportFrom === startOfMonth(addDays(startOfMonth(today), -1)) &&
+                      exportTo === endOfMonth(addDays(startOfMonth(today), -1)),
+                    onClick: () => {
+                      const previous = addDays(startOfMonth(today), -1);
+                      setExportFrom(startOfMonth(previous));
+                      setExportTo(endOfMonth(previous));
+                    },
+                  },
+                  {
+                    label: 'Everything to date',
+                    active: exportFrom === ALL_TIME_FROM && exportTo === today,
+                    onClick: () => {
+                      // The export API needs a bounded range; this sentinel
+                      // covers every record a clinic could hold.
+                      setExportFrom(ALL_TIME_FROM);
+                      setExportTo(today);
+                    },
+                  },
+                ]}
+              />
             </Card>
 
             <Alert tone="info" title="What the export contains">
@@ -735,39 +503,13 @@ export function FinancePage() {
                     <p className="text-[11px] text-ink-400">{preview.counts.expenses} rows</p>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge tone="success">
-                      Collected {formatMoney(preview.totals.collectedMinor, currency)}
-                    </Badge>
-                    <Badge tone={preview.totals.netCashMinor >= 0 ? 'brand' : 'danger'}>
-                      Net cash {formatMoney(preview.totals.netCashMinor, currency)}
-                    </Badge>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() =>
-                        window.open(
-                          `/finance/print?from=${preview.from}&to=${preview.to}`,
-                          '_blank',
-                        )
-                      }
-                    >
-                      <Printer className="h-3.5 w-3.5" aria-hidden />
-                      Export as PDF (Bill)
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => void runExport()}
-                      loading={exporting}
-                    >
-                      <Download className="h-3.5 w-3.5" aria-hidden />
-                      Download CSV
-                    </Button>
-                  </div>
+                <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 py-3">
+                  <Badge tone="success">
+                    Collected {formatMoney(preview.totals.collectedMinor, currency)}
+                  </Badge>
+                  <Badge tone={preview.totals.netCashMinor >= 0 ? 'brand' : 'danger'}>
+                    Net cash {formatMoney(preview.totals.netCashMinor, currency)}
+                  </Badge>
                 </div>
               </Card>
             )}

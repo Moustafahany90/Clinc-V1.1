@@ -11,7 +11,7 @@ import {
   StatusBadge,
 } from '../../components/ui';
 import { formatTime, minutesToLabel } from '../../lib/format';
-import type { DoctorOption, Service } from '../../lib/types';
+import type { DoctorOption } from '../../lib/types';
 import type { QuickActionState } from '../../lib/useQuickAction';
 import type {
   QuickActionAppointment,
@@ -101,32 +101,6 @@ export function DoctorFilter({
         {doctors.map((doctor) => (
           <option key={doctor.id} value={doctor.id}>
             Dr {doctor.firstName} {doctor.lastName}
-          </option>
-        ))}
-      </Select>
-    </Field>
-  );
-}
-
-export function ServiceFilter({
-  services,
-  value,
-  onChange,
-  className = 'w-full sm:w-60',
-}: {
-  services: Service[];
-  value: string;
-  onChange: (value: string) => void;
-  className?: string;
-}) {
-  const active = services.filter((service) => service.isActive);
-  return (
-    <Field label="Service" hint="Controls the appointment length." className={className}>
-      <Select value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">Clinic default</option>
-        {active.map((service) => (
-          <option key={service.id} value={service.id}>
-            {service.name} · {service.durationMinutes} min
           </option>
         ))}
       </Select>

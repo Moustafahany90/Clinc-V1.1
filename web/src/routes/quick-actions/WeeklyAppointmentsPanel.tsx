@@ -5,11 +5,13 @@ import {
   fetchWeeklyAppointmentsSummary,
 } from '../../lib/quickActions';
 import { CalendarRange, TrendingUp } from 'lucide-react';
+import { formatDateOnly } from '../../lib/format';
 import {
   Alert,
   Badge,
   SectionCard,
   Stat,
+  StatusBadge,
   Table,
   TableWrap,
   TH,
@@ -44,7 +46,7 @@ export function WeeklyAppointmentsPanel() {
             <div className="grid gap-3 sm:grid-cols-3">
               <Stat
                 label="Week"
-                value={`${data.weekStart} → ${data.weekEnd}`}
+                value={`${formatDateOnly(data.weekStart)} → ${formatDateOnly(data.weekEnd)}`}
                 hint={`${timezone}`}
                 icon={CalendarRange}
                 tone="brand"
@@ -57,11 +59,11 @@ export function WeeklyAppointmentsPanel() {
                 tone="brand"
               />
               <Stat
-                label="By status"
-                value={Object.values(data.byStatus).reduce((a, b) => a + b, 0)}
-                hint={`Breakdown of ${data.total} appointments`}
+                label="Completed"
+                value={data.byStatus.DONE}
+                hint={`Visits marked done out of ${data.total}`}
                 icon={TrendingUp}
-                tone="muted"
+                tone="success"
               />
             </div>
 
@@ -77,8 +79,10 @@ export function WeeklyAppointmentsPanel() {
                   <TBody>
                     {Object.entries(data.byStatus).map(([status, count]) => (
                       <TR key={status}>
-                        <TD>{status}</TD>
-                        <TD className="tabular">{count}</TD>
+                        <TD>
+                          <StatusBadge status={status} />
+                        </TD>
+                        <TD className="tabular text-right">{count}</TD>
                       </TR>
                     ))}
                   </TBody>

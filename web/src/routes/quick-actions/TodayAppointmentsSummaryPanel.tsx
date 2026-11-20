@@ -10,6 +10,7 @@ import {
   Badge,
   SectionCard,
   Stat,
+  StatusBadge,
   Table,
   TableWrap,
   TH,
@@ -32,8 +33,8 @@ export function TodayAppointmentsSummaryPanel() {
 
   return (
     <SectionCard
-      title="Today's appointments summary"
-      description={`Total appointments for ${timezone}, broken down by status.`}
+      title="Appointment summary"
+      description={`Today's total appointments in ${timezone}, broken down by status.`}
       icon={CalendarDays}
       action={<RefreshButton state={state} />}
       bodyClassName="space-y-4"
@@ -50,11 +51,11 @@ export function TodayAppointmentsSummaryPanel() {
                 tone="brand"
               />
               <Stat
-                label="By status"
-                value={Object.values(data.byStatus).reduce((a, b) => a + b, 0)}
-                hint="Breakdown per status"
+                label="Completed"
+                value={data.byStatus.DONE}
+                hint="Visits marked done today"
                 icon={TrendingUp}
-                tone="muted"
+                tone="success"
               />
               <Stat
                 label="Waiting"
@@ -77,8 +78,10 @@ export function TodayAppointmentsSummaryPanel() {
                   <TBody>
                     {Object.entries(data.byStatus).map(([status, count]) => (
                       <TR key={status}>
-                        <TD>{status}</TD>
-                        <TD className="tabular">{count}</TD>
+                        <TD>
+                          <StatusBadge status={status} />
+                        </TD>
+                        <TD className="tabular text-right">{count}</TD>
                       </TR>
                     ))}
                   </TBody>

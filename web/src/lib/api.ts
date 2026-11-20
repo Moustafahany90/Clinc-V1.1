@@ -155,17 +155,37 @@ export function csvDownloadUrl(from: string, to: string): string {
 }
 
 export async function downloadCsv(from: string, to: string): Promise<void> {
-  const res = await api.get('/financial-reports/accounting-export/run', {
-    params: { from, to },
-    responseType: 'blob',
-  });
-  const blob = new Blob([res.data as BlobPart], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `accounting-${from}-to-${to}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  try {
+    const res = await api.get('/financial-reports/accounting-export/run', {
+      params: { from, to },
+      responseType: 'blob',
+    });
+    const blob = new Blob([res.data as BlobPart], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `accounting-${from}-to-${to}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
+      try {
+        const text = await error.response.data.text();
+        const parsed = JSON.parse(text) as {
+          error?: { message?: string; code?: string; details?: unknown };
+        };
+        if (parsed?.error?.message) {
+          throw Object.assign(new Error(parsed.error.message), {
+            response: { status: error.response.status, data: parsed },
+            isAxiosError: true,
+          });
+        }
+      } catch {
+        // Fall through to the original error if the blob isn't JSON.
+      }
+    }
+    throw error;
+  }
 }

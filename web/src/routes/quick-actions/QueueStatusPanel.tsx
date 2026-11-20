@@ -79,7 +79,8 @@ export function QueueStatusPanel() {
 
             {data.waiting > 0 && (
               <Alert tone="warning">
-                {data.waiting} patient(s) are still waiting for their appointment.
+                {data.waiting} {data.waiting === 1 ? 'patient is' : 'patients are'} still waiting for
+                their appointment.
               </Alert>
             )}
           </>

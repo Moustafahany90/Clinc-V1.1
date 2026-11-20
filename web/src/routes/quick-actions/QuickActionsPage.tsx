@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CalendarCheck,
   CalendarClock,
@@ -118,8 +118,8 @@ const ACTIONS: QuickActionDefinition[] = [
   },
   {
     id: 'today-summary',
-    label: "Today's appointments",
-    description: 'Total appointments, broken down by status',
+    label: 'Appointment summary',
+    description: "Today's totals, broken down by status",
     icon: CalendarDays,
     permission: 'APPOINTMENTS_READ',
   },
@@ -154,9 +154,23 @@ const ACTIONS: QuickActionDefinition[] = [
 export function QuickActionsPage() {
   const { hasPermission } = useAuth();
   const [selected, setSelected] = useState<QuickActionId>('availability-today');
+  const panelRef = useRef<HTMLDivElement>(null);
+  const hasMounted = useRef(false);
 
   const visible = ACTIONS.filter((action) => hasPermission(action.permission));
   const current = visible.find((action) => action.id === selected) ?? visible[0] ?? null;
+  const currentId = current?.id;
+
+  // The action grid can be taller than the viewport, so bring the result into
+  // view after a deliberate selection instead of leaving it below the fold.
+  useEffect(() => {
+    if (!hasMounted.current) {
+      hasMounted.current = true;
+      return;
+    }
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    panelRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+  }, [currentId]);
 
   return (
     <div className="space-y-6">
@@ -174,7 +188,7 @@ export function QuickActionsPage() {
         />
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {visible.map((action) => {
               const active = action.id === current.id;
               return (
@@ -183,6 +197,7 @@ export function QuickActionsPage() {
                   type="button"
                   onClick={() => setSelected(action.id)}
                   aria-pressed={active}
+                  aria-controls="quick-action-panel"
                   className={cn(
                     'flex items-start gap-3 rounded-2xl border p-3.5 text-left transition-[border-color,background,box-shadow]',
                     'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500',
@@ -217,7 +232,7 @@ export function QuickActionsPage() {
             })}
           </div>
 
-          <div>
+          <div ref={panelRef} id="quick-action-panel" className="scroll-mt-24">
             {current.id === 'availability-today' && <AvailabilityTodayPanel />}
             {current.id === 'appointments-today' && <TodayAppointmentsPanel />}
             {current.id === 'availability-week' && <WeeklyAvailabilityPanel />}

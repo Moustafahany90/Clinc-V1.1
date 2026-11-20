@@ -294,7 +294,7 @@ export interface TodayExpensesResponse {
 
 export interface ExpenseRow {
   id: string;
-  expenseDate: Date;
+  expenseDate: string;
   amountMinor: number;
   category: { name: string };
   description: string | null;

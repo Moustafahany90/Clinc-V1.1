@@ -28,7 +28,6 @@ import {
   OpeningHoursText,
   QuickActionResult,
   RefreshButton,
-  ServiceFilter,
   SlotChips,
   doctorName,
 } from './shared';
@@ -40,11 +39,10 @@ import {
  */
 export function WeeklyAvailabilityPanel() {
   const { user } = useAuth();
-  const { doctors, services, timezone } = useClinic();
+  const { doctors, timezone } = useClinic();
   const isDoctor = user?.role === 'DOCTOR';
   const [anchor, setAnchor] = useState(todayInZone(timezone));
   const [doctorId, setDoctorId] = useState(isDoctor ? (user?.id ?? '') : '');
-  const [serviceId, setServiceId] = useState('');
 
   const state = useQuickAction(
     (signal) =>
@@ -52,11 +50,10 @@ export function WeeklyAvailabilityPanel() {
         {
           weekStart: anchor,
           doctorId: doctorId || undefined,
-          serviceId: serviceId || undefined,
         },
         signal,
       ),
-    { deps: [anchor, doctorId, serviceId] },
+    { deps: [anchor, doctorId] },
   );
 
   return (
@@ -101,7 +98,6 @@ export function WeeklyAvailabilityPanel() {
         {!isDoctor && (
           <DoctorFilter doctors={doctors} value={doctorId} onChange={setDoctorId} />
         )}
-        <ServiceFilter services={services} value={serviceId} onChange={setServiceId} />
       </FilterBar>
 
       <QuickActionResult state={state} loadingLabel="Building the week's availability…">
@@ -145,9 +141,11 @@ export function WeeklyAvailabilityPanel() {
                       <p className="text-[13px] font-semibold text-ink-900">
                         {weekdayName(day.date)} · {formatDateOnly(day.date)}
                       </p>
-                      <p className="text-[11px] text-ink-400">
-                        {day.doctors.length} doctor{day.doctors.length === 1 ? '' : 's'}
-                      </p>
+                      {day.isOpen && (
+                        <p className="text-[11px] text-ink-400">
+                          {day.doctors.length} doctor{day.doctors.length === 1 ? '' : 's'}
+                        </p>
+                      )}
                     </div>
                     <Badge
                       tone={day.totalAvailable > 0 ? 'success' : day.isOpen ? 'warning' : 'muted'}
@@ -157,32 +155,38 @@ export function WeeklyAvailabilityPanel() {
                     </Badge>
                   </div>
 
-                  <div className="mt-3 space-y-3">
-                    {day.doctors.map((row) => (
-                      <div
-                        key={`${day.date}-${row.doctor.id}`}
-                        className="border-t border-line pt-2.5 first:border-t-0 first:pt-0"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-[12px] font-medium text-ink-700">
-                            {doctorName(row.doctor)}
-                          </span>
-                          <OpeningHoursText hours={row.openingHours} />
+                  {!day.isOpen ? (
+                    <p className="mt-3 text-[12px] text-ink-500">
+                      {day.doctors[0]?.openingHours.reason ?? 'The clinic is closed on this day.'}
+                    </p>
+                  ) : (
+                    <div className="mt-3 space-y-3">
+                      {day.doctors.map((row) => (
+                        <div
+                          key={`${day.date}-${row.doctor.id}`}
+                          className="border-t border-line pt-2.5 first:border-t-0 first:pt-0"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-[12px] font-medium text-ink-700">
+                              {doctorName(row.doctor)}
+                            </span>
+                            {row.openingHours.isOpen && <OpeningHoursText hours={row.openingHours} />}
+                          </div>
+                          <div className="mt-1.5">
+                            {!row.isOpen ? (
+                              <p className="text-[12px] text-ink-400">
+                                {row.openingHours.reason ?? 'Not available'}
+                              </p>
+                            ) : row.availableCount === 0 ? (
+                              <p className="text-[12px] text-ink-400">Fully booked</p>
+                            ) : (
+                              <SlotChips slots={row.slots} limit={8} />
+                            )}
+                          </div>
                         </div>
-                        <div className="mt-1.5">
-                          {!row.isOpen ? (
-                            <p className="text-[12px] text-ink-400">
-                              {row.openingHours.reason ?? 'Not available'}
-                            </p>
-                          ) : row.availableCount === 0 ? (
-                            <p className="text-[12px] text-ink-400">Fully booked</p>
-                          ) : (
-                            <SlotChips slots={row.slots} limit={8} />
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </Card>
               ))}
             </div>

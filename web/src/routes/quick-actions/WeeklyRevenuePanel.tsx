@@ -1,5 +1,6 @@
 import { useAuth } from '../../lib/auth';
 import { useClinic } from '../../lib/clinic';
+import { formatDateOnly } from '../../lib/format';
 import { formatMoney } from '../../lib/money';
 import { useQuickAction } from '../../lib/useQuickAction';
 import { fetchWeeklyRevenue } from '../../lib/quickActions';
@@ -47,7 +48,7 @@ export function WeeklyRevenuePanel() {
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <Stat
                 label="Week"
-                value={`${data.weekStart} → ${data.weekEnd}`}
+                value={`${formatDateOnly(data.weekStart)} → ${formatDateOnly(data.weekEnd)}`}
                 hint={`${data.timezone}`}
                 icon={CalendarRange}
                 tone="brand"
@@ -94,14 +95,14 @@ export function WeeklyRevenuePanel() {
                         <TR key={day.date}>
                           <TD>
                             <span className="text-[11px] text-ink-500">
-                              {day.date}
+                              {formatDateOnly(day.date)}
                             </span>
                           </TD>
-                          <TD className="tabular">
+                          <TD className="tabular text-right">
                             {formatMoney(day.revenueMinor, data.currency)}
                           </TD>
-                          <TD className="tabular">{day.paymentsCount}</TD>
-                          <TD className="tabular">
+                          <TD className="tabular text-right">{day.paymentsCount}</TD>
+                          <TD className="tabular text-right">
                             {formatMoney(day.refundsMinor, data.currency)}
                           </TD>
                         </TR>

@@ -59,6 +59,7 @@ interface AppointmentDialogProps {
   appointment?: Appointment | null;
   initialDate?: string;
   initialDoctorId?: string;
+  initialTime?: string;
   initialPatient?: Patient | null;
   onSaved?: (appointment: Appointment) => void;
 }
@@ -76,6 +77,7 @@ export function AppointmentDialog({
   appointment = null,
   initialDate,
   initialDoctorId,
+  initialTime,
   initialPatient = null,
   onSaved,
 }: AppointmentDialogProps) {
@@ -121,7 +123,7 @@ export function AppointmentDialog({
       date: appointment
         ? dateOnlyInZone(appointment.startAt)
         : initialDate ?? todayInZone(),
-      time: appointment ? formatTime(appointment.startAt) : '',
+      time: appointment ? formatTime(appointment.startAt) : (initialTime ?? ''),
       duration:
         appointment?.durationMinutes ??
         clinic?.defaultAppointmentMinutes ??
@@ -151,7 +153,7 @@ export function AppointmentDialog({
     setQuickError(null);
     // Doctors / services are only needed to seed the first doctor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, appointment?.id, initialDate, initialDoctorId]);
+  }, [open, appointment?.id, initialDate, initialDoctorId, initialTime]);
 
   const agendaState = useAsyncData<Agenda>(
     async () => {

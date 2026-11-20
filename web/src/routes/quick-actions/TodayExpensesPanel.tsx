@@ -1,5 +1,6 @@
 import { useAuth } from '../../lib/auth';
 import { useClinic } from '../../lib/clinic';
+import { formatDateOnly } from '../../lib/format';
 import { formatMoney } from '../../lib/money';
 import { useQuickAction } from '../../lib/useQuickAction';
 import { fetchTodayExpenses } from '../../lib/quickActions';
@@ -48,7 +49,7 @@ export function TodayExpensesPanel() {
               <Stat
                 label="Total spent"
                 value={formatMoney(data.totalMinor, data.currency)}
-                hint={`${data.count} recorded expense(s)`}
+                hint={`${data.count} recorded ${data.count === 1 ? 'expense' : 'expenses'}`}
                 icon={PieChart}
                 tone="brand"
               />
@@ -103,7 +104,7 @@ export function TodayExpensesPanel() {
                       {data.byCategory.map((cat) => (
                         <TR key={cat.name}>
                           <TD>{cat.name}</TD>
-                          <TD className="tabular font-semibold">
+                          <TD className="tabular text-right font-semibold">
                             {formatMoney(cat.totalMinor, data.currency)}
                           </TD>
                         </TR>
@@ -136,7 +137,7 @@ export function TodayExpensesPanel() {
                     <TBody>
                       {data.details.map((expense) => (
                         <TR key={expense.id}>
-                          <TD className="tabular">{expense.expenseDate.toISOString().slice(0, 10)}</TD>
+                          <TD className="tabular">{formatDateOnly(expense.expenseDate)}</TD>
                           <TD>{expense.category.name}</TD>
                           <TD className="tabular">
                             {formatMoney(expense.amountMinor, data.currency)}
