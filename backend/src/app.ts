@@ -7,6 +7,7 @@ import { env } from './config/env.js';
 import { apiRouter } from './routes.js';
 import { prisma } from './lib/prisma.js';
 import { auditHealth } from './lib/audit.js';
+import { log, safeRoute } from './lib/logger.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 
@@ -48,6 +49,35 @@ export function createApp(): express.Express {
     const id = req.get('x-request-id') ?? randomUUID();
     req.requestId = id;
     res.setHeader('x-request-id', id);
+    next();
+  });
+
+  // One structured line per completed request. No bodies, headers, query
+  // strings or raw URLs are captured; the route template is used instead.
+  app.use((req, res, next) => {
+    const started = Date.now();
+    res.once('finish', () => {
+      const probe =
+        req.path === '/healthz' ||
+        req.path.startsWith('/api/v1/health') ||
+        req.path === '/api/v1/readyz';
+      const level = probe
+        ? 'debug'
+        : res.statusCode >= 500
+          ? 'error'
+          : res.statusCode >= 400
+            ? 'warn'
+            : 'info';
+      log(level, 'http.request', {
+        requestId: req.requestId ?? null,
+        method: req.method,
+        route: safeRoute(req),
+        status: res.statusCode,
+        durationMs: Date.now() - started,
+        userId: req.user?.id ?? null,
+        role: req.user?.role ?? null,
+      });
+    });
     next();
   });
 

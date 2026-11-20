@@ -639,6 +639,16 @@ reportsRouter.post(
     assertContentSize(content);
 
     const report = await prisma.$transaction(async (tx) => {
+      // Serialize report creation per visit; the pre-check above races when two
+      // requests arrive together. The lock is transaction-scoped and released
+      // automatically on commit or rollback.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`report-visit:${visit.id}`}))`;
+      const raced = await tx.report.findFirst({
+        where: { visitId: visit.id },
+        select: { id: true },
+      });
+      if (raced) throw conflict('This visit already has a report. Open it to continue editing.');
+
       const created = await tx.report.create({
         data: {
           visitId: visit.id,

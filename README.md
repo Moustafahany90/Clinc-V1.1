@@ -11,7 +11,7 @@ A full-stack, independent Ultrasound Clinic Management System. The frontend is a
 **Backend** (`backend/`)
 - Node.js 20+, TypeScript 5, Express 4, tsx (dev) / tsc (build)
 - Prisma ORM v6, Zod validation, JWT access/refresh tokens
-- Multer uploads, Nodemailer SMTP, optional Microsoft Graph
+- Multer uploads for images and attachments
 - PDF generation via pdfkit
 
 **Data & Infra**

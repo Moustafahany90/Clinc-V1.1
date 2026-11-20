@@ -29,7 +29,7 @@ export function whatsappConfigured(): boolean {
  */
 export function toWhatsAppRecipient(
   phone: string | null | undefined,
-  defaultCountryCode = env.EVOLUTION_DEFAULT_COUNTRY_CODE || env.WHATSAPP_DEFAULT_COUNTRY_CODE,
+  defaultCountryCode = env.EVOLUTION_DEFAULT_COUNTRY_CODE,
 ): string | null {
   if (!phone) return null;
   let digits = phone.replace(/\D/g, '');
@@ -80,25 +80,68 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
+/**
+ * Bounded retry policy for transient Evolution start-up / connectivity blips.
+ *
+ * Only failures that are safe to replay are retried:
+ *  - connection-level fetch errors (ECONNREFUSED, ENOTFOUND, reset, ...) mean the
+ *    provider never received the request, so a replay cannot duplicate it;
+ *  - timeouts on idempotent GET reads (status / QR / connect state).
+ *
+ * A timed-out non-idempotent request (e.g. message/sendMedia) is NEVER replayed:
+ * the provider may already have accepted it and delivered the WhatsApp message.
+ */
+export const EVOLUTION_MAX_ATTEMPTS = 3;
+const EVOLUTION_RETRY_BASE_DELAY_MS = 250;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === 'TimeoutError' || error.name === 'AbortError')
+  );
+}
+
+function isRetryableFailure(error: unknown, idempotent: boolean): boolean {
+  if (isTimeoutError(error)) return idempotent;
+  // Node's fetch surfaces connection failures (refused/reset/unreachable) as
+  // TypeError. They occur before the provider can process the request.
+  return error instanceof TypeError;
+}
+
 async function evolutionRequest(
   fetchImpl: typeof fetch,
   url: string,
   init: RequestInit,
 ): Promise<Response> {
-  try {
-    return await fetchImpl(url, {
-      ...init,
-      signal: AbortSignal.timeout(env.EVOLUTION_API_TIMEOUT_MS),
-    });
-  } catch (error) {
-    const timedOut =
-      error instanceof Error &&
-      (error.name === 'TimeoutError' || error.name === 'AbortError');
-    throw new WhatsAppError(
-      timedOut ? 'WHATSAPP_TIMEOUT' : 'WHATSAPP_NETWORK_ERROR',
-      timedOut ? 'WhatsApp service timed out.' : 'WhatsApp service could not be reached.',
-    );
+  const idempotent = (init.method ?? 'GET').toUpperCase() === 'GET';
+
+  for (let attempt = 1; attempt <= EVOLUTION_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await fetchImpl(url, {
+        ...init,
+        signal: AbortSignal.timeout(env.EVOLUTION_API_TIMEOUT_MS),
+      });
+    } catch (error) {
+      const timedOut = isTimeoutError(error);
+      if (attempt < EVOLUTION_MAX_ATTEMPTS && isRetryableFailure(error, idempotent)) {
+        await sleep(EVOLUTION_RETRY_BASE_DELAY_MS * attempt);
+        continue;
+      }
+      const suffix = attempt > 1 ? ' after bounded retries.' : '.';
+      throw new WhatsAppError(
+        timedOut ? 'WHATSAPP_TIMEOUT' : 'WHATSAPP_NETWORK_ERROR',
+        timedOut
+          ? `WhatsApp service timed out${suffix}`
+          : `WhatsApp service could not be reached${suffix}`,
+      );
+    }
   }
+  // Unreachable: the loop either returns a Response or throws above.
+  throw new WhatsAppError('WHATSAPP_NETWORK_ERROR', 'WhatsApp service could not be reached.');
 }
 
 /**

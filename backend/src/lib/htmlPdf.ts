@@ -19,6 +19,15 @@ async function getBrowser(): Promise<Browser> {
   return browser;
 }
 
+/** Close the shared renderer so short-lived processes (tests, scripts) can exit. */
+export async function closeHtmlPdfBrowser(): Promise<void> {
+  const pending = browserPromise;
+  browserPromise = null;
+  if (!pending) return;
+  const browser = await pending.catch(() => null);
+  if (browser?.isConnected()) await browser.close();
+}
+
 /**
  * One Chromium renderer for every HTML-based report design (legacy gyn4d and
  * block templates). JavaScript is off and every non-data request is blocked:

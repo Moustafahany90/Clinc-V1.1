@@ -13,7 +13,6 @@ import { parseBody, paginationSchema, parseQuery, uuidSchema } from '../../lib/v
 import { authenticate, currentUser, requirePermission } from '../../middleware/auth.js';
 import { issuePasswordSetup } from '../../lib/invites.js';
 import { auditFromRequest } from '../../lib/audit.js';
-import { emailConfigured } from '../../lib/email.js';
 
 export const usersRouter = Router();
 usersRouter.use(authenticate);
@@ -130,7 +129,6 @@ const createUserSchema = z.object({
   role: roleSchema,
   permissions: z.array(permissionSchema).optional(),
   password: z.string().min(1).optional(),
-  sendInvite: z.boolean().default(true),
 });
 
 usersRouter.post(
@@ -177,13 +175,10 @@ usersRouter.post(
       },
     });
 
-    let invite: { url?: string; emailed: boolean } | null = null;
-    if (!passwordHash && payload.sendInvite) {
+    let invite: { url: string } | null = null;
+    if (!passwordHash) {
       const issued = await issuePasswordSetup(user.id, currentUser(req).id);
-      invite = {
-        emailed: issued.emailed,
-        ...(issued.emailed ? {} : { url: issued.url }),
-      };
+      invite = { url: issued.url };
     }
 
     await auditFromRequest(req, {
@@ -193,7 +188,7 @@ usersRouter.post(
       metadata: { role: user.role, permissions: user.permissions },
     });
 
-    res.status(201).json({ user, invite, emailConfigured: emailConfigured() });
+    res.status(201).json({ user, invite });
   }),
 );
 
@@ -380,10 +375,6 @@ usersRouter.post(
       entityId: id,
     });
 
-    res.json({
-      emailed: issued.emailed,
-      emailConfigured: emailConfigured(),
-      ...(issued.emailed ? {} : { url: issued.url }),
-    });
+    res.json({ url: issued.url });
   }),
 );

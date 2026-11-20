@@ -189,20 +189,64 @@ export interface FieldProps {
   children: React.ReactNode;
 }
 
+const LABELABLE_TAGS = new Set(['input', 'select', 'textarea']);
+
 export function Field({ label, htmlFor, hint, error, required, className, children }: FieldProps) {
+  const generatedId = React.useId();
+  const childId =
+    React.isValidElement(children) && typeof children.props === 'object' && children.props !== null
+      ? ((children.props as { id?: string }).id as string | undefined)
+      : undefined;
+
+  // Associate the label with the control automatically so every field in the app
+  // is reachable by clicking its label and exposed with a name to screen readers.
+  const canInjectId =
+    !childId &&
+    React.isValidElement(children) &&
+    (typeof children.type !== 'string' || LABELABLE_TAGS.has(children.type));
+
+  const targetId = htmlFor ?? generatedId;
+  const messageId = `${childId ?? targetId}-message`;
+  const labelFor = childId ?? (canInjectId ? targetId : htmlFor);
+  const message = error ?? hint;
+  const describedBy = message ? messageId : undefined;
+
+  // Keep any description the control already declared, and expose validation
+  // errors to assistive technology instead of relying on colour alone.
+  function describedProps(element: React.ReactElement) {
+    const existing = (element.props as { 'aria-describedby'?: string })['aria-describedby'];
+    return {
+      'aria-describedby': [existing, describedBy].filter(Boolean).join(' ') || undefined,
+      'aria-invalid': error ? true : undefined,
+    };
+  }
+
+  const control = React.isValidElement(children)
+    ? canInjectId
+      ? React.cloneElement(children as React.ReactElement<{ id?: string }>, {
+          id: targetId,
+          ...describedProps(children as React.ReactElement),
+        })
+      : React.cloneElement(children as React.ReactElement, describedProps(children as React.ReactElement))
+    : children;
+
   return (
     <div className={cn('space-y-1.5', className)}>
       {label && (
-        <label htmlFor={htmlFor} className="flex items-center gap-1 text-[13px] font-medium text-ink-700">
+        <label htmlFor={labelFor} className="flex items-center gap-1 text-[13px] font-medium text-ink-700">
           {label}
           {required && <span className="text-clay-500">*</span>}
         </label>
       )}
-      {children}
-      {error ? (
-        <p className="text-xs text-clay-700">{error}</p>
-      ) : hint ? (
-        <p className="text-xs text-ink-500">{hint}</p>
+      {control}
+      {message ? (
+        <p
+          id={messageId}
+          role={error ? 'alert' : undefined}
+          className={cn('text-xs', error ? 'text-clay-700' : 'text-ink-500')}
+        >
+          {message}
+        </p>
       ) : null}
     </div>
   );
@@ -243,13 +287,17 @@ export function Checkbox({
   label?: React.ReactNode;
   description?: React.ReactNode;
 }) {
+  const autoId = React.useId();
+  const controlId = id ?? autoId;
+  const descriptionId = description ? `${controlId}-description` : undefined;
   return (
     <div className={cn('flex items-start gap-2.5', className)}>
       <CheckboxPrimitive.Root
-        id={id}
+        id={controlId}
         checked={checked}
         onCheckedChange={(v) => onCheckedChange(v === true)}
         disabled={disabled}
+        aria-describedby={descriptionId}
         className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] border border-line-strong bg-white transition-colors data-[state=checked]:border-brand-600 data-[state=checked]:bg-brand-600 disabled:opacity-50"
       >
         <CheckboxPrimitive.Indicator>
@@ -259,11 +307,15 @@ export function Checkbox({
       {(label || description) && (
         <div className="min-w-0 leading-snug">
           {label && (
-            <label htmlFor={id} className="block cursor-pointer text-[13px] font-medium text-ink-800">
+            <label htmlFor={controlId} className="block cursor-pointer text-[13px] font-medium text-ink-800">
               {label}
             </label>
           )}
-          {description && <p className="mt-0.5 text-xs text-ink-500">{description}</p>}
+          {description && (
+            <p id={descriptionId} className="mt-0.5 text-xs text-ink-500">
+              {description}
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -285,23 +337,31 @@ export function Switch({
   label?: React.ReactNode;
   description?: React.ReactNode;
 }) {
+  const autoId = React.useId();
+  const controlId = id ?? autoId;
+  const descriptionId = description ? `${controlId}-description` : undefined;
   return (
     <div className="flex items-center justify-between gap-4">
       {(label || description) && (
         <div className="min-w-0">
           {label && (
-            <label htmlFor={id} className="block text-[13px] font-medium text-ink-800">
+            <label htmlFor={controlId} className="block text-[13px] font-medium text-ink-800">
               {label}
             </label>
           )}
-          {description && <p className="mt-0.5 text-xs text-ink-500">{description}</p>}
+          {description && (
+            <p id={descriptionId} className="mt-0.5 text-xs text-ink-500">
+              {description}
+            </p>
+          )}
         </div>
       )}
       <SwitchPrimitive.Root
-        id={id}
+        id={controlId}
         checked={checked}
         onCheckedChange={onCheckedChange}
         disabled={disabled}
+        aria-describedby={descriptionId}
         className="relative h-6 w-10 shrink-0 rounded-full bg-ink-200 transition-colors data-[state=checked]:bg-brand-600 disabled:opacity-50"
       >
         <SwitchPrimitive.Thumb className="block h-4 w-4 translate-x-1 rounded-full bg-white shadow transition-transform data-[state=checked]:translate-x-5" />
@@ -653,14 +713,35 @@ export function TBody({ className, ...props }: React.HTMLAttributes<HTMLTableSec
 export function TR({
   className,
   interactive,
+  onClick,
+  onKeyDown,
+  tabIndex,
   ...props
 }: React.HTMLAttributes<HTMLTableRowElement> & { interactive?: boolean }) {
   return (
     <tr
       className={cn(
-        interactive && 'cursor-pointer transition-colors hover:bg-brand-50/40',
+        interactive &&
+          'cursor-pointer transition-colors hover:bg-brand-50/40 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-500',
         className,
       )}
+      tabIndex={interactive ? (tabIndex ?? 0) : tabIndex}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (!interactive || event.defaultPrevented) return;
+        // Let nested links and controls handle their own activation.
+        if (
+          event.target instanceof Element &&
+          event.target.closest('a, button, input, select, textarea, [contenteditable="true"]')
+        ) {
+          return;
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick?.(event as unknown as React.MouseEvent<HTMLTableRowElement>);
+        }
+      }}
       {...props}
     />
   );

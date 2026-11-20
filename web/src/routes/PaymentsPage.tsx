@@ -10,6 +10,7 @@ import { formatMoney } from '../lib/money';
 import type { Patient, Payment } from '../lib/types';
 import { PaymentDialog, RefundDialog } from '../components/FinanceDialogs';
 import { PatientSearch } from '../components/PatientSearch';
+import { RangePresets } from '../components/RangePresets';
 import { useToast } from '../components/toast';
 import {
   Alert,
@@ -173,44 +174,41 @@ export function PaymentsPage() {
             )}
           </Field>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-ink-500">
-          <button
-            type="button"
-            className="font-medium text-brand-700 hover:text-brand-800"
-            onClick={() => {
-              setFrom(startOfMonth(today));
-              setTo(today);
-              setPaymentPage(1);
-            }}
-          >
-            This month
-          </button>
-          <span>·</span>
-          <button
-            type="button"
-            className="font-medium text-brand-700 hover:text-brand-800"
-            onClick={() => {
-              setFrom(addDays(today, -30));
-              setTo(today);
-              setPaymentPage(1);
-            }}
-          >
-            Last 30 days
-          </button>
-          <span>·</span>
-          <button
-            type="button"
-            className="font-medium text-brand-700 hover:text-brand-800"
-            onClick={() => {
-              const previousMonthDay = addDays(startOfMonth(today), -1);
-              setFrom(startOfMonth(previousMonthDay));
-              setTo(endOfMonth(previousMonthDay));
-              setPaymentPage(1);
-            }}
-          >
-            Previous month
-          </button>
-        </div>
+        <RangePresets
+          className="mt-3"
+          presets={[
+            {
+              label: 'This month',
+              active: from === startOfMonth(today) && to === today,
+              onClick: () => {
+                setFrom(startOfMonth(today));
+                setTo(today);
+                setPaymentPage(1);
+              },
+            },
+            {
+              label: 'Last 30 days',
+              active: from === addDays(today, -30) && to === today,
+              onClick: () => {
+                setFrom(addDays(today, -30));
+                setTo(today);
+                setPaymentPage(1);
+              },
+            },
+            {
+              label: 'Previous month',
+              active:
+                from === startOfMonth(addDays(startOfMonth(today), -1)) &&
+                to === endOfMonth(addDays(startOfMonth(today), -1)),
+              onClick: () => {
+                const previousMonthDay = addDays(startOfMonth(today), -1);
+                setFrom(startOfMonth(previousMonthDay));
+                setTo(endOfMonth(previousMonthDay));
+                setPaymentPage(1);
+              },
+            },
+          ]}
+        />
       </Card>
 
       {paymentsState.error && <Alert tone="danger">{paymentsState.error}</Alert>}

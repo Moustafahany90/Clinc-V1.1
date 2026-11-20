@@ -1,0 +1,60 @@
+# Optional Phase 7 monitoring overlay — DISABLED BY DEFAULT.
+#
+# The service below is behind the `monitoring` Compose profile, so plain
+# `docker compose up -d` is unchanged. To opt in explicitly:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml \
+#     --profile monitoring up -d clinic-monitor
+#
+# It runs read-only checks and writes JSONL alerts to a local sink. Phase 7.1
+# adds opt-in Telegram delivery and an external heartbeat hook: both are inert
+# unless their environment variables are supplied from a protected env file.
+# No credential or destination is stored in this repository.
+
+services:
+  clinic-monitor:
+    profiles: ["monitoring"]
+    image: bash:5-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: ["bash", "/app/scripts/p7-monitor.sh", "--loop"]
+    environment:
+      P7_STATE_DIR: /var/lib/clinic-monitor
+      P7_ALERT_SINK: /var/lib/clinic-monitor/alerts.jsonl
+      P7_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-ultrasound-clinic}
+      # Phase 8.3.1: one approved backup root; the script derives the tier,
+      # manifests, logs, quarantine and wal-archive directories from it.
+      P7_BACKUP_ROOT: ${P7_BACKUP_ROOT:-/mnt/clinic-backups}
+      P7_BACKUP_UUID: ${P7_BACKUP_UUID:-0f21089c-c507-4903-96e5-daf637100d53}
+      P7_BACKUP_FSTYPE: ${P7_BACKUP_FSTYPE:-ext4}
+      P7_MAX_AGE_HOURS: ${P7_BACKUP_MAX_AGE_HOURS:-26}
+      P7_INTERVAL_SEC: ${P7_MONITOR_INTERVAL_SEC:-300}
+      P7_ALERT_REPEAT_SEC: ${P7_ALERT_REPEAT_SEC:-3600}
+      P7_SINK_MAX_BYTES: ${P7_SINK_MAX_BYTES:-1048576}
+      P7_SINK_KEEP: ${P7_SINK_KEEP:-5}
+      # Optional delivery/heartbeat configuration. Leave blank to disable.
+      P7_TELEGRAM_BOT_TOKEN: ${P7_TELEGRAM_BOT_TOKEN:-}
+      P7_TELEGRAM_CHAT_ID: ${P7_TELEGRAM_CHAT_ID:-}
+      P7_TELEGRAM_API_BASE: ${P7_TELEGRAM_API_BASE:-https://api.telegram.org}
+      P7_HOST_LABEL: ${P7_HOST_LABEL:-clinic-monitor}
+      P7_HEARTBEAT_URL: ${P7_HEARTBEAT_URL:-}
+      P7_ALLOW_INSECURE_TEST: ${P7_ALLOW_INSECURE_TEST:-0}
+      TZ: ${APP_TIMEZONE:-Africa/Cairo}
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - p7_monitor_state:/var/lib/clinic-monitor
+      # Read-only view of the approved backup disk. Without this bind mount a
+      # containerised monitor cannot see the host mount or its backup sets.
+      - /mnt/clinic-backups:/mnt/clinic-backups:ro
+      # Read-only Docker socket: checks use `docker ps`/`inspect` only.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - clinic_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  p7_monitor_state: {}

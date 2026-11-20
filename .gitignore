@@ -48,3 +48,4 @@ test-results/
 
 # Docker local data
 .docker-data/
+*.patch

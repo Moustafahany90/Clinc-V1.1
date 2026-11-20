@@ -15,6 +15,17 @@
 
 {$CLINIC_DOMAIN} {
 	encode zstd gzip
+	# Phase 7.1: logging-only redaction. Strip everything from the first '?' in
+	# the logged request URI and delete credential headers. No routing, header,
+	# TLS or proxy behaviour is changed.
+	log {
+		format filter {
+			wrap json
+			request>uri regexp \?.* ""
+			request>headers>Authorization delete
+			request>headers>Cookie delete
+		}
+	}
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	}

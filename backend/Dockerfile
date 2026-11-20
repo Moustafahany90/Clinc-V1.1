@@ -34,7 +34,8 @@ COPY package.json package-lock.json ./
 # @prisma/client declares the Prisma CLI as an optional peer, so npm installs the
 # CLI (and its engine/fetch tooling) even with --omit=dev. The running API only
 # needs @prisma/client and the generated .prisma client; keep the migrate CLI in
-# the build stage, where the compose `migrate` service uses it.
+# the build stage, where the compose `migrate` service uses it. The pinned CLI
+# also pulls in vulnerable transitive packages; no runtime source imports them.
 RUN npm ci --omit=dev \
  && rm -rf node_modules/prisma \
            node_modules/@prisma/config \
@@ -44,6 +45,7 @@ RUN npm ci --omit=dev \
            node_modules/@prisma/fetch-engine \
            node_modules/@prisma/get-platform \
            node_modules/deepmerge-ts \
+           node_modules/effect \
  && npx playwright install --with-deps chromium \
  && chmod -R 755 /ms-playwright \
  && npm cache clean --force

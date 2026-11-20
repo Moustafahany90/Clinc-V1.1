@@ -1,0 +1,11 @@
+# Shell scripts and SQL must keep LF endings so they run inside Linux
+# containers and on the Ubuntu production host. Without this, a Windows
+# checkout can produce files whose shebang is "#!/usr/bin/env bash\r".
+*.sh text eol=lf
+*.bash text eol=lf
+*.sql text eol=lf
+
+# Keep container build files LF-only for the same reason.
+Dockerfile text eol=lf
+Dockerfile.* text eol=lf
+*.dockerfile text eol=lf

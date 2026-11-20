@@ -1,17 +1,20 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { api } from './lib/api';
 import { AuthProvider } from './lib/auth';
 import { ClinicProvider } from './lib/clinic';
 import { ToastProvider } from './components/toast';
 import { AppShell } from './components/AppShell';
-import { AuthLoading, RedirectIfAuthed, RequireAuth, RequirePermission } from './components/guards';
-import { AccountPage } from './routes/AccountPage';
+import {
+  AuthLoading,
+  PageLoading,
+  RedirectIfAuthed,
+  RequireAuth,
+  RequirePermission,
+} from './components/guards';
 import { AgendaPage } from './routes/AgendaPage';
-import { AuditPage } from './routes/AuditPage';
 import { DashboardPage } from './routes/DashboardPage';
 import { ExpensesPage } from './routes/ExpensesPage';
-import { FinanceBillPrintPage } from './routes/FinanceBillPrintPage';
 import { FinancePage } from './routes/FinancePage';
 import { LoginPage } from './routes/LoginPage';
 import { NotFoundPage } from './routes/NotFoundPage';
@@ -19,20 +22,39 @@ import { PatientDetailPage } from './routes/PatientDetailPage';
 import { PatientsPage } from './routes/PatientsPage';
 import { PaymentsPage } from './routes/PaymentsPage';
 import { QueuePage } from './routes/QueuePage';
-import { ReportEditorPage } from './routes/ReportEditorPage';
-import { ReportPrintPage } from './routes/ReportPrintPage';
-import { ReportsPage } from './routes/ReportsPage';
-import { SetPasswordPage } from './routes/SetPasswordPage';
-import { SettingsPage } from './routes/SettingsPage';
-import { SetupPage } from './routes/SetupPage';
-import { UsersPage } from './routes/UsersPage';
-import { VisitDetailPage } from './routes/VisitDetailPage';
-import { VisitsPage } from './routes/VisitsPage';
+import { QuickActionsPage } from './routes/quick-actions/QuickActionsPage';
+
+// Heavy, less frequently used screens are loaded on demand so the daily
+// workspace (dashboard, agenda, patients, finance lists) stays in the main
+// chunk. Every chunk is still gated by the same RequireAuth/RequirePermission
+// wrappers below.
+const AccountPage = lazy(() => import('./routes/AccountPage').then((m) => ({ default: m.AccountPage })));
+const AuditPage = lazy(() => import('./routes/AuditPage').then((m) => ({ default: m.AuditPage })));
+const FinanceBillPrintPage = lazy(() =>
+  import('./routes/FinanceBillPrintPage').then((m) => ({ default: m.FinanceBillPrintPage })),
+);
+const ReportEditorPage = lazy(() =>
+  import('./routes/ReportEditorPage').then((m) => ({ default: m.ReportEditorPage })),
+);
+const ReportPrintPage = lazy(() =>
+  import('./routes/ReportPrintPage').then((m) => ({ default: m.ReportPrintPage })),
+);
+const ReportsPage = lazy(() => import('./routes/ReportsPage').then((m) => ({ default: m.ReportsPage })));
+const SetPasswordPage = lazy(() =>
+  import('./routes/SetPasswordPage').then((m) => ({ default: m.SetPasswordPage })),
+);
+// SettingsPage pulls in the large block-template editors (ReportTemplatesCard).
+const SettingsPage = lazy(() => import('./routes/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const SetupPage = lazy(() => import('./routes/SetupPage').then((m) => ({ default: m.SetupPage })));
+const UsersPage = lazy(() => import('./routes/UsersPage').then((m) => ({ default: m.UsersPage })));
+const VisitDetailPage = lazy(() =>
+  import('./routes/VisitDetailPage').then((m) => ({ default: m.VisitDetailPage })),
+);
+const VisitsPage = lazy(() => import('./routes/VisitsPage').then((m) => ({ default: m.VisitsPage })));
 
 interface SetupStatus {
   setupRequired: boolean;
   hasAnyUser: boolean;
-  emailConfigured: boolean;
 }
 
 function AppRoutes() {
@@ -48,7 +70,7 @@ function AppRoutes() {
       })
       .catch(() => {
         // If the backend is unreachable, let the normal auth flow surface it.
-        if (active) setStatus({ setupRequired: false, hasAnyUser: true, emailConfigured: false });
+        if (active) setStatus({ setupRequired: false, hasAnyUser: true });
       });
     return () => {
       active = false;
@@ -67,9 +89,10 @@ function AppRoutes() {
   }
 
   return (
-    <Routes>
-      <Route
-        path="/setup"
+    <Suspense fallback={<PageLoading />}>
+      <Routes>
+        <Route
+          path="/setup"
         element={
           <SetupPage
             onComplete={() => setStatus((prev) => (prev ? { ...prev, setupRequired: false } : prev))}
@@ -121,6 +144,16 @@ function AppRoutes() {
           element={
             <RequirePermission permission="APPOINTMENTS_READ">
               <AgendaPage />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/quick-actions"
+          element={
+            <RequirePermission
+              anyOf={['APPOINTMENTS_READ', 'PAYMENTS_READ', 'EXPENSES_READ', 'FINANCE_READ']}
+            >
+              <QuickActionsPage />
             </RequirePermission>
           }
         />
@@ -239,7 +272,8 @@ function AppRoutes() {
         <Route path="/account" element={<AccountPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 }
 

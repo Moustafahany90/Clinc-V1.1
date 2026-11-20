@@ -178,7 +178,6 @@ before(async () => {
         email,
         role,
         password: 'Str0ng!Passw0rd',
-        sendInvite: false,
       },
     });
     assert.equal(user.status, 201, JSON.stringify(user.body));

@@ -147,7 +147,9 @@
 
 @media print {
   @page {
-    size: A4;
+    /* Report documents are laid out at 8.5in (US Letter) width, matching the
+       server-rendered PDF; A4 here clipped or rescaled the browser print view. */
+    size: letter;
     margin: 16mm 15mm;
   }
 

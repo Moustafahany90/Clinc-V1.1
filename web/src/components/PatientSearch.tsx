@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState, type KeyboardEvent } from 'react';
 import { Loader2, Phone, Search, UserRound, X } from 'lucide-react';
 import { api, errorMessage } from '../lib/api';
 import { ageFromDob, formatDateOnly } from '../lib/format';
@@ -34,7 +34,42 @@ export function PatientSearch({
   const [results, setResults] = useState<Patient[]>([]);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const debounced = useDebounced(query.trim(), 220);
+
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [results]);
+
+  function select(patient: Patient) {
+    onChange(patient);
+    setQuery('');
+    setOpen(false);
+    setActiveIndex(-1);
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setOpen(true);
+      if (results.length) setActiveIndex((index) => Math.min(index + 1, results.length - 1));
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (results.length) setActiveIndex((index) => Math.max(index - 1, 0));
+      return;
+    }
+    if (event.key === 'Enter' && open && activeIndex >= 0 && results[activeIndex]) {
+      event.preventDefault();
+      select(results[activeIndex]);
+      return;
+    }
+    if (event.key === 'Escape') {
+      setOpen(false);
+      setActiveIndex(-1);
+    }
+  }
 
   useEffect(() => {
     if (!debounced) {
@@ -118,6 +153,13 @@ export function PatientSearch({
         role="combobox"
         aria-expanded={open}
         aria-controls={`${inputId}-results`}
+        aria-autocomplete="list"
+        aria-activedescendant={
+          open && activeIndex >= 0 && results[activeIndex]
+            ? `${inputId}-option-${results[activeIndex].id}`
+            : undefined
+        }
+        onKeyDown={onKeyDown}
       />
 
       {open && (query.trim().length > 0 || results.length > 0) && (
@@ -144,18 +186,19 @@ export function PatientSearch({
             </div>
           )}
 
-          {results.map((patient) => (
+          {results.map((patient, index) => (
             <button
               key={patient.id}
+              id={`${inputId}-option-${patient.id}`}
               type="button"
               role="option"
-              aria-selected={false}
-              onClick={() => {
-                onChange(patient);
-                setQuery('');
-                setOpen(false);
-              }}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-brand-50/70 focus:bg-brand-50/70 focus:outline-none"
+              aria-selected={index === activeIndex}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => select(patient)}
+              className={cn(
+                'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-brand-50/70 focus:bg-brand-50/70 focus:outline-none',
+                index === activeIndex && 'bg-brand-50/70',
+              )}
             >
               <Avatar firstName={patient.firstName} lastName={patient.lastName} size="sm" />
               <span className="min-w-0 flex-1">

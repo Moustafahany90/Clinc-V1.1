@@ -8,6 +8,7 @@ import { addDays, endOfMonth, formatDateOnly, startOfMonth, todayInZone } from '
 import { formatMoney, parseMoneyToMinor } from '../lib/money';
 import type { Expense, ExpenseCategory } from '../lib/types';
 import { ReasonDialog } from '../components/dialogs';
+import { RangePresets } from '../components/RangePresets';
 import { useToast } from '../components/toast';
 import {
   Alert,
@@ -172,43 +173,38 @@ export function ExpensesPage() {
             />
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-ink-500">
-          <button
-            type="button"
-            className="font-medium text-brand-700 hover:text-brand-800"
-            onClick={() => {
-              setFrom(startOfMonth(today));
-              setTo(endOfMonth(today));
-              setPage(1);
-            }}
-          >
-            This month
-          </button>
-          <span>·</span>
-          <button
-            type="button"
-            className="font-medium text-brand-700 hover:text-brand-800"
-            onClick={() => {
-              setFrom(addDays(today, -30));
-              setTo(today);
-              setPage(1);
-            }}
-          >
-            Last 30 days
-          </button>
-          <span>·</span>
-          <button
-            type="button"
-            className="font-medium text-brand-700 hover:text-brand-800"
-            onClick={() => {
-              setFrom('');
-              setTo('');
-              setPage(1);
-            }}
-          >
-            All time
-          </button>
-        </div>
+        <RangePresets
+          className="mt-3"
+          presets={[
+            {
+              label: 'This month',
+              active: from === startOfMonth(today) && to === endOfMonth(today),
+              onClick: () => {
+                setFrom(startOfMonth(today));
+                setTo(endOfMonth(today));
+                setPage(1);
+              },
+            },
+            {
+              label: 'Last 30 days',
+              active: from === addDays(today, -30) && to === today,
+              onClick: () => {
+                setFrom(addDays(today, -30));
+                setTo(today);
+                setPage(1);
+              },
+            },
+            {
+              label: 'All time',
+              active: !from && !to,
+              onClick: () => {
+                setFrom('');
+                setTo('');
+                setPage(1);
+              },
+            },
+          ]}
+        />
       </Card>
 
       <div className="grid gap-3 sm:grid-cols-2">

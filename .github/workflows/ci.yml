@@ -1,0 +1,163 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22.14.0'
+
+jobs:
+  static:
+    name: Secret scan, typecheck, build, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            web/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Scan tracked and project files for credentials
+        run: node scripts/secret-scan.mjs
+
+      # Encoding regression tests are mandatory. Historical scanning is
+      # intentionally a manual owner gate: the unresolved .env.example finding
+      # would fail CI if --history were run here, so it is not part of CI.
+      - name: Secret scanner encoding regression tests
+        run: node --test scripts/secret-scan-regression.test.mjs
+
+      - name: Root dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Frontend dependency audit
+        working-directory: web
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Frontend tests
+        working-directory: web
+        run: npm run test:run -- --reporter=dot
+
+  backend-tests:
+    name: Backend tests (synthetic PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_USER: clinic
+          POSTGRES_PASSWORD: clinic
+          POSTGRES_DB: clinic_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clinic -d clinic_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://clinic:clinic@127.0.0.1:5432/clinic_test?schema=public
+      JWT_ACCESS_SECRET: ci-test-access-secret-0123456789abcdef0123456789
+      JWT_REFRESH_SECRET: ci-test-refresh-secret-fedcba9876543210fedcba9876543210
+      APP_ORIGIN: http://127.0.0.1:5173
+      COOKIE_SECURE: 'false'
+      TRUST_PROXY: '1'
+      LOG_LEVEL: info
+      EVOLUTION_API_ENABLED: 'false'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+
+      # Required for Playwright-based PDF rendering tests (htmlPdf.ts/chromium).
+      # Uses the repo-pinned Playwright version from backend node_modules.
+      - name: Install Playwright Chromium
+        working-directory: backend
+        run: npx --no-install playwright install --with-deps chromium
+
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npm run prisma:generate
+
+      - name: Apply migrations to synthetic test database
+        working-directory: backend
+        run: npm run prisma:deploy
+
+      - name: Backend tests
+        working-directory: backend
+        run: npm test
+
+  dependency-audit:
+    name: Backend dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+
+      - name: Run backend audit
+        working-directory: backend
+        run: npm audit --omit=dev --json > "$RUNNER_TEMP/backend-audit.json" || true
+
+      - name: Classify audit result
+        run: node scripts/dependency-audit.mjs "$RUNNER_TEMP/backend-audit.json"
