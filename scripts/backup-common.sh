@@ -193,6 +193,18 @@ backup_require_storage() {
   fi
 }
 
+# Read a manifest key whose value spans multiple lines. The PITR producer
+# writes required_wal_files as KEY=<first segment> followed by bare
+# continuation lines, so a single-line reader silently truncates the list.
+# Continuation lines are those without '='; the next key line ends the value.
+manifest_values() {
+  awk -v k="$1" '
+    index($0, k "=") == 1 { sub(/^[^=]*=/, ""); print; inside = 1; next }
+    inside && index($0, "=") == 0 { print; next }
+    inside { exit }
+  ' "$2" 2>/dev/null | tr -d '\r'
+}
+
 # --- WAL segment helpers (Phase 9.5) ---------------------------------------
 # These are pure path/name helpers. They never read a database or write files.
 

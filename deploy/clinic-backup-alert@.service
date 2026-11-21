@@ -1,0 +1,13 @@
+[Unit]
+Description=Clinic backup failure notification (%i)
+Documentation=file:/opt/clinic/docs/backup-restore.md
+# Started by OnFailure= on clinic-backup-schedule@<job>.service. It only writes
+# to the journal; it does not retry, restart or mutate any backup data.
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'printf "CLINIC BACKUP FAILURE: job=%s - see docs/backup-restore.md#backup-scheduling and the scheduler journal\n" "%i" >&2'
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

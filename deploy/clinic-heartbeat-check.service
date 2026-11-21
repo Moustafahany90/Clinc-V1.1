@@ -1,16 +1,18 @@
 # Phase 7 template -- NOT installed by the audit.
 # This runs from a separate scheduler so a stopped monitor is still detected.
+# The application root is /opt/clinic (PB-31).
 [Unit]
 Description=Clinic Phase 7 monitor heartbeat (dead-man's switch) check
-Documentation=file:/opt/clinic/Clinc-V1.1/docs/monitoring-runbook.md
+Documentation=file:/opt/clinic/docs/monitoring-runbook.md
 
 [Service]
 Type=oneshot
-# Phase 8.3.1: no 'deploy' account exists on the verified host; use the real
-# admin account. This check does not read the root-only backup disk.
+# Phase 9.8/PB-26: clinc_server is the primary group of the monitor process and
+# owns the 0750 state directory together with root, so this check can stat the
+# heartbeat while non-members cannot read the directory.
 User=clinc_server
 Group=clinc_server
-WorkingDirectory=/opt/clinic/Clinc-V1.1
+WorkingDirectory=/opt/clinic
 EnvironmentFile=-/etc/clinic/monitor.env
 ExecStart=/usr/bin/bash scripts/p7-check-heartbeat.sh
 NoNewPrivileges=true

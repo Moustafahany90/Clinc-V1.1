@@ -13,11 +13,12 @@ DRIFT_CRIT="${P7_TIME_DRIFT_CRITICAL_SECONDS:-900}"
 now="$(p7_now)"
 
 ntp="unknown"
+ntp_available=0
 if command -v timedatectl >/dev/null 2>&1; then
   value="$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)"
   case "$value" in
-    yes) ntp="yes" ;;
-    no) ntp="no" ;;
+    yes) ntp="yes"; ntp_available=1 ;;
+    no) ntp="no"; ntp_available=1 ;;
   esac
 fi
 
@@ -40,6 +41,10 @@ elif [ "$drift" != "null" ] && [ "$abs_drift" -ge "$DRIFT_WARN" ]; then
   status="warn"; severity="info"; message="system clock drift exceeds warning threshold"
 elif [ "$ntp" = "no" ]; then
   status="warn"; severity="info"; message="NTP reports unsynchronised; certificate checks may be unreliable"
+elif [ "$ntp_available" -eq 0 ] && [ -z "${P7_EXPECTED_EPOCH:-}" ]; then
+  # Fail closed: without an authoritative NTP signal or a trusted external
+  # epoch there is no evidence that the clock is correct.
+  status="unknown"; severity="unknown"; message="clock synchronisation is unverifiable (no timedatectl signal and no P7_EXPECTED_EPOCH)"
 fi
 
 extra="\"utc\":\"$(p7_iso "$now")\",\"timezone\":\"$(p7_json_escape "$(date +%Z 2>/dev/null || printf 'unknown')")\",\"driftSeconds\":${drift},\"ntpSynchronized\":\"$(p7_json_escape "$ntp")\",\"runbook\":\"docs/monitoring-runbook.md#clock\""

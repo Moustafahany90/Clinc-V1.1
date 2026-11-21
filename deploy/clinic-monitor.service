@@ -1,21 +1,23 @@
 # Phase 7 template -- NOT installed by the audit.
-# Adjust WorkingDirectory, User/Group and state paths for the target host before use.
+# Adjust WorkingDirectory and the approved state-directory ownership for the
+# target host before use. The application root is /opt/clinic (PB-31).
 [Unit]
 Description=Clinic Phase 7 read-only monitor
-Documentation=file:/opt/clinic/Clinc-V1.1/docs/monitoring-runbook.md
+Documentation=file:/opt/clinic/docs/monitoring-runbook.md
 After=docker.service
 Requires=docker.service
 
 [Service]
 Type=oneshot
-# Phase 8.3.1 verified host: there is no 'deploy' or 'clinicdeploy' account.
-# The backup disk and all backup dirs are root:root 0700, and the only
-# non-system admin account (clinc_server) cannot read them. A monitor that
-# must validate the mount and read manifests therefore has to run as root
-# until an owner-approved dedicated read-only account/ACL is created.
+# Phase 9.8/PB-26: the monitor keeps root for read-only backup-disk access, but
+# its primary group is clinc_server so state files are created root:clinc_server
+# with UMask=0007. The independent heartbeat checker runs as clinc_server and
+# can therefore stat/read the heartbeat without root. Non-members are denied by
+# the 0750 directory mode. See docs/monitoring-runbook.md#monitor-state-directory.
 User=root
-Group=root
-WorkingDirectory=/opt/clinic/Clinc-V1.1
+Group=clinc_server
+UMask=0007
+WorkingDirectory=/opt/clinic
 EnvironmentFile=-/etc/clinic/monitor.env
 ExecStart=/usr/bin/bash scripts/p7-monitor.sh
 NoNewPrivileges=true

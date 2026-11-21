@@ -41,6 +41,7 @@ NEWEST_STAMP=""
 error() { echo "ERROR: $*" >&2; ERRORS=$((ERRORS + 1)); }
 warn() { echo "WARNING: $*" >&2; WARNINGS=$((WARNINGS + 1)); }
 
+manifest_value() { awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$2" 2>/dev/null | tr -d '\r'; }
 file_bytes() { wc -c < "$1" | tr -d ' '; }
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
@@ -107,6 +108,14 @@ for set_dir in $(backup_list_set_dirs); do
 
   manifest="${set_dir}/MANIFEST.txt"
   sums="${set_dir}/SHA256SUMS"
+
+  # PITR base sets use a different manifest contract and are verified by
+  # scripts/verify-pitr-base.sh, which the scheduler calls in the same verify
+  # job. Skipping them here prevents a false format-3/4 failure.
+  if [ -f "$manifest" ] && [ "$(manifest_value backup_format "$manifest")" = "pitr-base-1" ]; then
+    echo "  PITR base set: delegated to scripts/verify-pitr-base.sh"
+    continue
+  fi
 
   tier="$(printf '%s' "$base" | sed -n 's/^clinic-\(daily\|weekly\|monthly\)-.*/\1/p')"
   [ -n "$tier" ] || error "set directory '$base' does not start with clinic-<tier>-<STAMP>."
