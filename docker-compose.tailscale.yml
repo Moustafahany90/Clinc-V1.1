@@ -1,0 +1,61 @@
+# Tailscale-only HTTPS overlay. Use together with docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.tailscale.yml config --quiet
+#   docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d --build
+#
+# This is the approved ingress shape for a Tailscale-only deployment. Unlike
+# docker-compose.tls.yml it:
+#   - publishes no port 80;
+#   - publishes 443 only on the host's tailnet IPv4 (TAILSCALE_IP);
+#   - uses Tailscale-issued certificate files instead of public ACME;
+#   - never exposes db, backend, or evolution beyond their existing binds.
+#
+# APP_ORIGIN must be https://<CLINIC_DOMAIN> and COOKIE_SECURE=true when
+# NODE_ENV=production. The backend refuses to start otherwise.
+
+services:
+  caddy:
+    image: caddy:2.11-alpine
+    restart: unless-stopped
+    # Same 4-core/16 GB host budget as the public TLS overlay.
+    mem_limit: 256m
+    mem_reservation: 64m
+    cpus: 0.5
+    cpu_shares: 256
+    pids_limit: 100
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      CLINIC_DOMAIN: ${CLINIC_DOMAIN:?set CLINIC_DOMAIN in .env}
+      TAILSCALE_CERT_DIR: ${TAILSCALE_CERT_DIR:?set TAILSCALE_CERT_DIR in .env}
+    ports:
+      - target: 443
+        published: "443"
+        protocol: tcp
+        host_ip: ${TAILSCALE_IP:?set TAILSCALE_IP in .env}
+    volumes:
+      - ./deploy/Caddyfile.tailscale:/etc/caddy/Caddyfile:ro
+      - ${TAILSCALE_CERT_DIR:?set TAILSCALE_CERT_DIR in .env}:/etc/tailscale/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    # Read-only probe against Caddy's loopback admin endpoint. It does not
+    # change TLS behaviour, issue certificates, or open a new listener.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - clinic_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  caddy_data:
+    name: ultrasound_clinic_caddy_data
+  caddy_config:
+    name: ultrasound_clinic_caddy_config

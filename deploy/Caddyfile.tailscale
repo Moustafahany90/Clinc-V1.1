@@ -1,0 +1,43 @@
+# Tailscale-only HTTPS front door for Clinic-V1.1.
+#
+# Usage:
+#   CLINIC_DOMAIN=clinic.example.ts.net \
+#   TAILSCALE_IP=100.x.y.z \
+#   TAILSCALE_CERT_DIR=/etc/clinic/tailscale-certs \
+#   docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d --build
+#
+# This Caddyfile is deliberately different from deploy/Caddyfile:
+#   - automatic HTTPS and ACME are disabled;
+#   - there is no HTTP site block and no redirect listener;
+#   - TLS uses the certificate and key issued by `tailscale cert`;
+#   - Caddy listens only via the host publish bound to TAILSCALE_IP:443.
+#
+# APP_ORIGIN must be https://<CLINIC_DOMAIN> and COOKIE_SECURE=true in
+# production. The backend refuses to start otherwise.
+{
+	auto_https off
+	admin 127.0.0.1:2019
+}
+
+https://{$CLINIC_DOMAIN} {
+	encode zstd gzip
+	tls {$TAILSCALE_CERT_DIR}/{$CLINIC_DOMAIN}.crt {$TAILSCALE_CERT_DIR}/{$CLINIC_DOMAIN}.key
+
+	# Logging-only redaction. Strip everything from the first '?' in the logged
+	# request URI and delete credential headers. No routing, header, TLS or
+	# proxy behaviour is changed.
+	log {
+		format filter {
+			wrap json
+			request>uri regexp \?.* ""
+			request>headers>Authorization delete
+			request>headers>Cookie delete
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+	reverse_proxy web:80 {
+		header_up X-Real-IP {remote_host}
+	}
+}
