@@ -22,6 +22,14 @@ require_file() {
     fail "missing or unreadable: $1"
   fi
 }
+require_text() {
+  local needle="$1" file="$2" label="$3"
+  if grep -qF -- "$needle" "$ROOT/$file" 2>/dev/null; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+}
 
 # Needles are assembled at runtime so this script does not itself contain the
 # forbidden strings as a copy-pasteable literal.
@@ -134,8 +142,9 @@ for f in \
   scripts/backup-retention.sh scripts/backup-scheduler.sh \
   scripts/verify-pitr-base.sh scripts/pitr-base-backup.sh scripts/pitr-restore.sh \
   scripts/p7-check-pitr.sh scripts/p7-check-wal.sh scripts/p7-monitor.sh \
-  scripts/p98-backup-isolated-test.sh \
-  deploy/backup.env.example \
+  scripts/p7-check-cert.sh scripts/p7-check-time.sh scripts/p7-check-containers.sh \
+  scripts/p98-backup-isolated-test.sh scripts/p98-monitor-isolated-test.sh \
+  deploy/backup.env.example deploy/monitor.env.example \
   docs/backup-restore.md docs/monitoring-runbook.md \
   docs/PRODUCTION_READINESS_PHASE9_6.md; do
   require_file "$f"
@@ -206,6 +215,48 @@ for s in scripts/backup-scheduler.sh scripts/backup-retention.sh; do
     fail "$s has no visible mutation gates"
   fi
 done
+
+# --- Phase 9.8 monitoring invariants (PB-26 and PB-29) -----------------------
+require_text 'Group=clinc_server' \
+  'deploy/clinic-monitor.service' \
+  'PB-26: monitor unit uses the clinc_server primary group'
+require_text 'UMask=0007' \
+  'deploy/clinic-monitor.service' \
+  'PB-26: monitor unit creates group-readable state'
+require_text 'User=clinc_server' \
+  'deploy/clinic-heartbeat-check.service' \
+  'PB-26: heartbeat check runs as clinc_server'
+require_text '0750 root:clinc_server' \
+  'deploy/monitor.env.example' \
+  'PB-26: monitor env template documents the 0750 state directory'
+
+require_text 'P7_CERT_FILES' \
+  'deploy/monitor.env.example' \
+  'PB-29: monitor env template declares P7_CERT_FILES'
+require_text 'P7_CERT_ENDPOINTS' \
+  'deploy/monitor.env.example' \
+  'PB-29: monitor env template declares P7_CERT_ENDPOINTS'
+require_text 'P7_CERT_ENDPOINT_TIMEOUT_SEC' \
+  'deploy/monitor.env.example' \
+  'PB-29: monitor env template declares a bounded endpoint timeout'
+require_text 'P7_CERT_ENDPOINTS' \
+  'docker-compose.monitoring.yml' \
+  'PB-29: monitoring compose overlay declares P7_CERT_ENDPOINTS'
+require_text 'P7_CERT_WARN_DAYS' \
+  'docker-compose.monitoring.yml' \
+  'PB-29: monitoring compose overlay declares certificate thresholds'
+require_text 'openssl s_client' \
+  'scripts/p7-check-cert.sh' \
+  'PB-29: certificate check supports explicit TLS endpoint mode'
+require_text 'ntp_available' \
+  'scripts/p7-check-time.sh' \
+  'PB-29: time check tracks whether NTP is verifiable'
+require_text 'docker ps failed' \
+  'scripts/p7-check-containers.sh' \
+  'PB-29: container check fails closed on docker errors'
+require_text 'p7-window-count' \
+  'scripts/p7-monitor.sh' \
+  'PB-29: monitor uses a global per-window alert counter'
 
 # --- No target-host installation is assumed ---------------------------------
 installed=0
