@@ -142,6 +142,49 @@ Capacity is checked in the tier directory before every backup after validation.
 Retention is available as a separate explicit script (see below), but no
 schedule, timer, alert delivery or automatic deletion is enabled by this change.
 
+### Scheduler dispatcher (repository configuration only)
+
+`scripts/backup-scheduler.sh` is the reviewed dispatcher for the five systemd
+jobs. Phase 9.8 corrected its argument contract; Phase 9.8 did **not** install,
+enable or run any unit. Every job accepts only its documented flags:
+
+```bash
+./scripts/backup-scheduler.sh full --dry-run
+./scripts/backup-scheduler.sh pitr-base --dry-run
+./scripts/backup-scheduler.sh verify --dry-run
+./scripts/backup-scheduler.sh retention --dry-run --keep-daily 7
+./scripts/backup-scheduler.sh wal-prune --dry-run
+```
+
+The `pitr-base` job requires `--pghost`, `--pgport`, `--pguser` and
+`--wal-archive-dir`. In the installed unit these are supplied from the protected
+`/etc/clinic/backup.env` file (mode `0600`, `root:root`) using the variables
+`PITR_PGHOST`, `PITR_PGPORT`, `PITR_PGUSER` and `WAL_ARCHIVE_DIR`; optional
+`PITR_PGDATABASE`, `PITR_TIER` and `PITR_AGE_RECIPIENT` are also documented in
+`deploy/backup.env.example`. The dispatcher never logs credentials. A missing
+mandatory value is a hard failure, not a usage fallback.
+
+Safety behaviour that must be re-verified on any target-shaped host:
+
+- `wal-prune` validates the mount, UUID and filesystem before creating any log
+  file or evaluating WAL candidates. An unmounted or mismatched disk fails
+  closed and deletes nothing.
+- `wal-prune` refuses to act unless a validated `pitr_ready` base exists, and
+  recomputes the same deterministic `plan_sha256` for dry-run and apply.
+- `verify` covers both logical format-3/4 sets and PITR `pitr-base-1` sets via
+  `scripts/verify-pitr-base.sh`, including base artifact SHA-256/size, the full
+  required WAL list, and per-segment sidecars.
+- `--apply --confirm DELETE` is required for every destructive cleanup. Timers
+  remain dry-run by default.
+- A repeated `flock` contention emits a structured monitor alert and exits
+  non-zero instead of silently reporting success. Failure of the unit itself
+  starts `clinic-backup-alert@<job>.service`, which writes a journal notice.
+- All active units use the single repository root `/opt/clinic`.
+
+The isolated proof is `bash scripts/p98-backup-isolated-test.sh` (30/30 synthetic
+checks). It uses stubbed mount tools and disposable fixtures; it does not prove
+target-host storage, installed timers, or a real base backup.
+
 ## Verify backup sets (read-only)
 
 ```bash

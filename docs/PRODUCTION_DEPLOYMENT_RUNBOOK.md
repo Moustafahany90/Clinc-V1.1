@@ -54,9 +54,9 @@ Proceed only when all applicable gates hold:
 | **G-3** | Every blocker required for this specific change is CLOSED or explicitly ACCEPTED RISK with owner signature in the register. |
 | **G-4** | Fresh `backup_format=4` backup exists, `backup-verify.sh` exit 0, and an isolated restore rehearsal passed. |
 | **G-5** | Migration inventory, data-validity results, table sizes, and lock budget are recorded. |
-| **G-6** | WAL mount is independently verified if the PITR overlay is in scope; PB-25/PB-27 are fixed before any PITR timer runs. |
+| **G-6** | WAL mount is independently verified if the PITR overlay is in scope; PB-25/PB-27 repository fixes and isolated proofs are present, and target-host mount evidence is recorded before any PITR or prune timer runs. |
 | **G-7** | Real DNS, certificate issuance plan, and approved domain are available if TLS is in scope. |
-| **G-8** | Monitoring/timer defects PB-25–PB-31 are closed for any unit being installed. |
+| **G-8** | PB-25–PB-31 repository fixes and isolated proofs are present; target-host installation evidence for PB-25/26/29/31 is recorded before any corresponding unit is enabled. |
 | **G-9** | `docs/PRODUCTION_ROLLBACK_RUNBOOK.md` is approved and the rollback decision owner is on standby. |
 
 If any gate fails, stop. Do not "continue and fix later".
@@ -172,8 +172,8 @@ Each step must satisfy its expected result before the next step starts.
 ### Step 9 — Fix and prepare scheduler/monitoring configuration
 
 - **Preconditions:** Step 8 passed.
-- **Command/procedure:** Resolve PB-25–PB-31 in the reviewed artifact: PITR-base mandatory arguments, monitor state ownership, WAL-prune mount validation, dispatcher argument contract, `P7_CERT_FILES`, verifier crash visibility, alert cap, fail-open fallbacks, single repository path, failure notification, and visible overlap skips. Prepare protected `/etc/clinic/*.env` files with owner-approved values and mode `0600`. Do not install units in this step.
-- **Expected result:** Reviewed configuration passes isolated fault-injection tests; all referenced paths agree; no populated env file is committed.
+- **Command/procedure:** Confirm the Phase 9.8 repository fixes for PB-25–PB-31 are present in the reviewed artifact: job-specific PITR arguments from `PITR_*` / `WAL_ARCHIVE_DIR`, `0750 root:clinc_server` monitor state model, fail-closed mount/prune and PITR base verification, dispatcher flag allowlists, `P7_CERT_FILES` plus `P7_CERT_ENDPOINTS`, crashing-check visibility, global alert cap, single `/opt/clinic` root, `OnFailure` notification, and visible overlap skips. Prepare protected `/etc/clinic/backup.env` and `/etc/clinic/monitor.env` with owner-approved values and mode `0600`; templates are `deploy/backup.env.example` and `deploy/monitor.env.example`. Do not install units in this step.
+- **Expected result:** `bash scripts/p98-backup-isolated-test.sh` (30/30) and `bash scripts/p98-monitor-isolated-test.sh` (37/37) pass on the reviewed artifact; `bash scripts/p97-readiness-preflight.sh` reports repository PASS; all referenced paths agree; no populated env file is committed. Target-host values and unit installation remain separate approvals.
 - **Failure condition:** Any shipped scheduler defect remains for a unit that will run, or a state-directory permission conflict remains.
 - **Abort criteria:** A timer would run with broken arguments or without mount fail-closed behavior. Do not install it.
 - **Responsible role:** Infrastructure Operator + Monitoring Owner.

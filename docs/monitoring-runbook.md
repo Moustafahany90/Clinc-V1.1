@@ -147,7 +147,10 @@ bash scripts/p7-check-containers.sh
 
 Uses only `docker ps -a` and `docker inspect`. It never stops, starts or removes
 containers. Restart counts are compared with small state files under
-`P7_STATE_DIR`.
+`P7_STATE_DIR`. Phase 9.8 made this check fail closed: a failed `docker` command,
+an unreadable health value, or an invalid restart/OOM value is reported as
+`unknown` and is never replaced by healthy defaults. A clean synthetic run
+reports `ok`.
 
 **Triage**
 
@@ -163,19 +166,34 @@ containers. Restart counts are compared with small state files under
 
 ## <a id="certificates"></a>TLS certificate expiry
 
+Phase 9.8 supports two **additive** sources. Configure at least one; an empty
+configuration reports `unknown` rather than silently passing.
+
 ```bash
+# Local public certificate files (newline-separated, no private keys):
 export P7_CERT_FILES=$'/etc/ssl/clinic/fullchain.pem\n/path/to/other.pem'
+
+# Optional explicit TLS endpoints (newline-separated host:port):
+export P7_CERT_ENDPOINTS=$'clinic.example:443\nbackup-monitor.internal:443'
+export P7_CERT_ENDPOINT_TIMEOUT_SEC=10
+
 bash scripts/p7-check-cert.sh
 ```
 
-Paths are newline-separated public certificate files only. The check uses local
-`openssl x509` and makes no network connection.
+`P7_CERT_FILES` uses local `openssl x509` and makes no network connection.
+`P7_CERT_ENDPOINTS` opens a TLS connection **only** to the explicitly configured
+addresses and reads the presented public certificate. No DNS lookup, ACME call,
+certificate issuance, renewal, or private-key read is performed. A missing file
+or unreachable endpoint is `unknown`, never `ok`.
 
-Thresholds: 30 days `warn`, 14 days `high`, 7 days `critical`.
+Thresholds: `P7_CERT_WARN_DAYS=30`, `P7_CERT_HIGH_DAYS=14`,
+`P7_CERT_CRITICAL_DAYS=7`. Expired certificates are `critical`.
 
 **Triage:** renew/reissue before the high threshold. Confirm the host clock is
 correct (see `#clock`) before trusting expiry output. Do not point this check at
-private keys.
+private keys. The isolated proof `bash scripts/p98-monitor-isolated-test.sh`
+uses locally generated self-signed certificates and a loopback TLS server; it
+does not contact a real domain.
 
 ---
 
@@ -211,13 +229,41 @@ bash scripts/p7-check-time.sh
 ```
 
 The check never queries a network time server. It reports UTC, timezone, drift
-(if a reference is supplied) and `timedatectl` NTP state where available.
+(if a trusted reference is supplied) and `timedatectl` NTP state where available.
 
-Thresholds: 60 s `warn`, 300 s `high`, 900 s `critical`. NTP unsynchronised is
-`warn` even without a reference.
+Thresholds: `P7_TIME_DRIFT_WARN_SECONDS=60`, `P7_TIME_DRIFT_HIGH_SECONDS=300`,
+`P7_TIME_DRIFT_CRITICAL_SECONDS=900`. NTP unsynchronised is `warn` when a
+`synchronised=no` signal is available. Phase 9.8 made the check fail closed:
+without an authoritative NTP signal **and** without `P7_EXPECTED_EPOCH`, the
+result is `unknown`, not `ok`. This prevents a host with no `timedatectl` from
+silently validating time-dependent certificate and backup checks.
 
 **Triage:** correct time is required for certificate validation, backup age and
 JWT/audit timestamps. Fix NTP before trusting other time-based alerts.
+
+---
+
+## <a id="monitor-state-directory"></a>Monitor state directory ownership (PB-26)
+
+The monitor must keep root-level read access to the backup disk, while the
+independent heartbeat check must be able to `stat` the heartbeat without root.
+Phase 9.8 uses one shared group instead of an ACL:
+
+- `clinic-monitor.service` runs `User=root`, `Group=clinc_server`, `UMask=0007`.
+- `clinic-heartbeat-check.service` runs `User=clinc_server`, `Group=clinc_server`.
+- The state directory is `0750 root:clinc_server`; files created by the monitor
+  are group-readable. Non-members cannot traverse the directory.
+
+Under a separate target-host authorization, create the directory once before
+installing either unit:
+
+```bash
+install -d -o root -g clinc_server -m 0750 /var/lib/clinic-monitor
+```
+
+Phase 9.8 proved this model with synthetic Linux users in a disposable
+container; it did **not** create, chmod, chown or install anything on a target
+host. `deploy/monitor.env.example` records the same contract.
 
 ---
 
@@ -241,14 +287,19 @@ the scheduler account and the state directory permissions. Do not assume that
 
 ## <a id="recovery"></a>Deduplication, rate limiting and recovery
 
-The monitor suppresses repeated identical non-ok lines for
-`P7_DEDUP_WINDOW_SECONDS` (default 300) and caps forwarded alerts per check at
-`P7_MAX_ALERTS_PER_WINDOW` (default 10). Escalations bypass dedup.
+The monitor suppresses repeated identical non-ok lines per check for
+`P7_DEDUP_WINDOW_SECONDS` (default 300). The rate limit is a **global**
+per-window budget: `P7_MAX_ALERTS_PER_WINDOW` (default 10) applies across all
+checks in the window, not separately to each check. Escalations still bypass
+per-check dedup, but they consume the global budget. A check that exits non-zero
+without emitting any JSON line produces a visible `check:<name>` `unknown`
+alert instead of disappearing.
 
 When a check returns to `ok`, the monitor emits one `monitor.recovery` line
 containing the original check name and previous status. Recovery lines go to
-the same local sink. A recovery notice is not proof that the underlying cause
-was fixed; confirm with the relevant check and, for backups, a verification run.
+the same local sink and consume the global window budget. A recovery notice is
+not proof that the underlying cause was fixed; confirm with the relevant check
+and, for backups, a verification run.
 
 To inspect the local sink without modifying it:
 

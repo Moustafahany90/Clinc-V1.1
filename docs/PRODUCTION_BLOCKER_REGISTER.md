@@ -1,8 +1,11 @@
-# Phase 9.7 — Production Blocker Register
+# Phase 9.7 / 9.8 — Production Blocker Register
 
 **Date:** 2026-11-21  
-**Branch / HEAD at assessment:** `fix/phase9-remediation` @ `a828bcf0efed9e061f9fb4fbd32d496d63c28309`  
-**Scope:** Consolidated register of every remaining Production blocker inherited from Phase 9.2–9.6 plus blockers newly identified in this Phase 9.7 review.
+**Branch / HEAD at original assessment:** `fix/phase9-remediation` @ `a828bcf0efed9e061f9fb4fbd32d496d63c28309`  
+**Branch / HEAD after Phase 9.8 repository remediation:** `fix/phase9-8-operational-defects` (local commits only)  
+**Scope:** Consolidated register of every Production blocker inherited from Phase 9.2–9.7 plus the repository-only Phase 9.8 remediation of PB-11 and PB-25–PB-31.
+
+> **Phase 9.8 update:** Repository defects are corrected and proved only with synthetic, disposable fixtures. Blockers whose acceptance criteria require target-host evidence, owner approval, installation, DNS/TLS, image scanning, or a restore drill remain **BLOCKED** or **OPEN**. No GitHub Actions run has occurred on the Phase 9.8 branch, and no Production operation was performed.
 
 > This register is a preparation artefact. It does **not** authorize deployment, migration, backup, restore, WAL pruning, certificate issuance, DNS changes, timer installation, or any other Production operation. No blocker in this register may be marked CLOSED on documentation or assumption alone.
 
@@ -142,12 +145,12 @@
 - **Severity:** High
 - **Component:** `backend/prisma/migrations/20261120222405_db_integrity_constraints/rollback.sql:5-13`; historical `PHASE9_3.md:40`
 - **Description:** The rollback file proposed a direct SQL deletion of a row in the Prisma migration ledger for a successful migration. Direct ledger edits are unsafe and must never be used.
-- **Current evidence:** File content verified in this phase; `PRODUCTION_READINESS_PHASE9_7.md` and the rollback runbook explicitly prohibit it and specify `prisma migrate resolve --rolled-back` / `--applied` and new forward migrations instead.
-- **Missing evidence:** Owner-approved correction of the historical file or an explicit standing instruction that supersedes it.
-- **Exact action required:** Treat the new runbook as authoritative; obtain approval to amend the rollback file text without changing applied migrations or history.
-- **Production authorization required:** No for documentation correction; yes for any target-host reconciliation.
-- **Acceptance criteria:** No Production procedure references direct ledger edits; any reconciliation uses Prisma CLI commands and is recorded.
-- **Final status:** **OPEN**
+- **Current evidence:** Phase 9.8 replaced the unsafe SQL in `rollback.sql` with Prisma-native reconciliation only and updated the live rollback runbook. The historical Phase M quote remains solely as an explicitly marked `UNSAFE / SUPERSEDED` example. `scripts/p97-readiness-preflight.sh` assembles the forbidden command at runtime, rejects any unmarked reintroduction, and exits 0 on the current repository. Commit `93509a2`.
+- **Missing evidence:** None for this repository-only item. Any actual ledger reconciliation remains a separately authorized target-host operation.
+- **Exact action required:** Re-run the preflight before a change window; use `prisma migrate resolve --rolled-back` / `--applied` or a new forward migration only under separate approval.
+- **Production authorization required:** No for the repository correction; yes for any target-host reconciliation.
+- **Acceptance criteria:** No live Production procedure references direct ledger edits; any reconciliation uses Prisma CLI commands and is recorded.
+- **Final status:** **CLOSED** (repository-only defect; no Production action performed)
 
 ### PB-12 — Migration #9 plain `CREATE INDEX` on populated tables
 
@@ -310,96 +313,108 @@
 - **Severity:** High
 - **Component:** `deploy/clinic-backup-schedule@.service`, `scripts/backup-scheduler.sh:165-167`, `scripts/pitr-base-backup.sh:66-69`
 - **Description:** The dispatcher invokes `pitr-base-backup.sh` with no arguments, but that script requires `--pghost`, `--pgport`, `--pguser`, and `--wal-archive-dir`. As shipped, the Sunday job exits with usage error 2 every time.
-- **Current evidence:** Verified directly in this phase: `pitr-base-backup.sh` enforces all four arguments and has no environment fallback for the WAL directory.
-- **Missing evidence:** An owner-approved argument source (protected env file or reviewed dispatcher change) and a successful scheduled dry/staged run.
-- **Exact action required:** Decide and document how the four mandatory values are provided, then test the job end-to-end in an isolated environment before installation. Do not install the timer as-is.
-- **Production authorization required:** No for the repository correction; yes for target-host installation.
-- **Acceptance criteria:** `pitr-base` job completes successfully with a `pitr_ready=true` manifest in an isolated rehearsal.
-- **Final status:** **OPEN**
+- **Current evidence:** Phase 9.8 changed the dispatcher to supply job-specific arguments. `--pghost`, `--pgport`, `--pguser` and `--wal-archive-dir` come from explicit flags or the protected `PITR_*` / `WAL_ARCHIVE_DIR` environment contract documented in `deploy/backup.env.example`. `bash scripts/p98-backup-isolated-test.sh` proves the mandatory values are passed and that an absent value fails closed (28/28 checks for the full backup group). Commit `62be9b6`.
+- **Missing evidence:** A target-host protected env file with owner-approved values, and one successful scheduled or staged run producing a real `pitr_ready=true` manifest. The isolated proof uses a stubbed producer and does not create a real base backup.
+- **Exact action required:** Populate the protected env file from verified target values and run one staged `pitr-base` job with real PostgreSQL before enabling the timer. Do not install the timer as-is.
+- **Production authorization required:** No for the repository correction; yes for target-host installation and the staged run.
+- **Acceptance criteria:** `pitr-base` job completes successfully with a `pitr_ready=true` manifest on an authorized target-shaped host.
+- **Final status:** **BLOCKED** (repository contract fixed; target-host evidence still required)
 
 ### PB-26 — Monitor state directory ownership conflict
 
 - **Severity:** High
 - **Component:** `deploy/clinic-monitor.service`, `deploy/clinic-heartbeat-check.service`, `/var/lib/clinic-monitor`
 - **Description:** The monitor runs as `root:root` and writes the heartbeat file, while the heartbeat check runs as `clinc_server:clinc_server` and must `stat` it. A `0700 root:root` state directory makes the independent heartbeat check return `unknown`.
-- **Current evidence:** Unit files and `scripts/p7-check-heartbeat.sh:17-25`; older docs describe a stale `deploy`-account ownership model.
-- **Missing evidence:** Approved ACL/ownership plan (for example `0750 root:clinc_server` with heartbeat readable) verified on the target.
-- **Exact action required:** Reconcile the two service users and state directory permissions before installation.
-- **Production authorization required:** No for the plan; yes for target-host permission changes.
+- **Current evidence:** Phase 9.8 sets `Group=clinc_server` and `UMask=0007` on `clinic-monitor.service`, runs `clinic-heartbeat-check.service` as `clinc_server:clinc_server`, and documents the `0750 root:clinc_server` state directory in `deploy/monitor.env.example` and `docs/monitoring-runbook.md#monitor-state-directory`. `bash scripts/p98-monitor-isolated-test.sh` proves in a disposable container that a group member can `stat` the heartbeat while a non-member is denied (37/37 monitor checks). Commit `3ace484`.
+- **Missing evidence:** Target-host creation/verification of `/var/lib/clinic-monitor` with the documented owner and mode, plus an observed heartbeat check from the real `clinc_server` account.
+- **Exact action required:** Create and verify the state directory under separate authorization, then observe both services before declaring the operational path healthy.
+- **Production authorization required:** No for the repository plan; yes for target-host permission changes and installation.
 - **Acceptance criteria:** Heartbeat check reports `ok` from `clinc_server` while the monitor remains root-only for backup-disk reads.
-- **Final status:** **OPEN**
+- **Final status:** **BLOCKED** (repository model fixed and synthetically proved; target-host permission evidence still required)
 
 ### PB-27 — WAL-prune path lacks mount fail-closed validation
 
 - **Severity:** High
 - **Component:** `scripts/backup-scheduler.sh:57,100-103,117-159`
 - **Description:** `mkdir -p "$LOG_DIR"` runs before the disk preflight and `prune_wal()` never calls the shared mount/UUID validator. If the backup disk is unmounted, the job can create directories on the root filesystem, pass a root-capacity preflight, and report "nothing pruned" with exit 0 instead of a storage outage.
-- **Current evidence:** Verified in the dispatcher source; other backup scripts do validate the mount, but this path does not.
-- **Missing evidence:** Corrected ordering and an explicit mount/UUID check before any pruning decision.
-- **Exact action required:** Move directory creation after storage validation and fail closed on an invalid mount before evaluating WAL candidates.
-- **Production authorization required:** No for the repository correction.
+- **Current evidence:** Phase 9.8 validates the mount, UUID and filesystem before creating any scheduler log directory or evaluating WAL candidates. The isolated proof shows an unmounted synthetic disk makes `wal-prune` exit non-zero, creates no log file, and deletes nothing. It also refuses when no validated `pitr_ready` base exists, when a retained base artifact is tampered with, and when `--apply` lacks `--confirm DELETE`. Commit `62be9b6`.
+- **Missing evidence:** None for this repository-only fail-closed defect. Target-host installation remains covered by PB-07.
+- **Exact action required:** Re-run `scripts/p98-backup-isolated-test.sh` after any scheduler change; install only under the separate change authorization.
+- **Production authorization required:** No for the repository correction; yes for target-host installation.
 - **Acceptance criteria:** Simulated unmounted backup disk makes the `wal-prune` job exit non-zero and delete nothing.
-- **Final status:** **OPEN**
+- **Final status:** **CLOSED** (repository-only defect; installation remains separately BLOCKED under PB-07)
 
 ### PB-28 — Dispatcher argument passthrough incompatibilities
 
 - **Severity:** Medium
 - **Component:** `scripts/backup-scheduler.sh:33-43,162-180`
 - **Description:** `--dry-run` is forwarded to `backup-retention.sh`, which does not accept that flag; positional arguments are also forwarded to `backup.sh` and `pitr-base-backup.sh`, which do not accept them. An operator following the dispatcher help can get an exit-2 usage error.
-- **Current evidence:** Argument parsers verified directly in this phase.
-- **Missing evidence:** A consistent dispatcher-to-job argument contract and isolated test result.
-- **Exact action required:** Restrict passthrough to flags each job actually supports; retest all five jobs in isolation.
-- **Production authorization required:** No.
+- **Current evidence:** Phase 9.8 rewrote the dispatcher with explicit per-job allowlists. All five jobs (`full`, `pitr-base`, `verify`, `retention`, `wal-prune`) run with documented flags in `scripts/p98-backup-isolated-test.sh` with no usage errors; unsupported flags are rejected. Commit `62be9b6`.
+- **Missing evidence:** None for this repository-only argument-contract defect. Target-host installation remains covered by PB-06/PB-07.
+- **Exact action required:** Re-run the isolated proof after any dispatcher change; install only under the separate change authorization.
+- **Production authorization required:** No for the repository correction; yes for target-host installation.
 - **Acceptance criteria:** All five dispatcher jobs run with their documented flags and no usage errors.
-- **Final status:** **OPEN**
+- **Final status:** **CLOSED** (repository-only defect; installation remains separately BLOCKED under PB-06/PB-07)
 
 ### PB-29 — Monitoring blind spots in shipped configuration
 
 - **Severity:** Medium
 - **Component:** `deploy/monitor.env.example`, `docker-compose.monitoring.yml`, `scripts/p7-monitor.sh:90-105,129-137`, `scripts/p7-check-time.sh`, `scripts/p7-check-containers.sh`
 - **Description:** `P7_CERT_FILES` is missing from the shipped env/compose config although `cert` is a default check, so that check reports `unknown`. The time check can stay `ok` when `timedatectl` is unavailable. Check exit codes are discarded and only JSON lines are forwarded, so a crashing check can be invisible. The per-window alert cap is ineffective because the counter is reset on every send path. `docker inspect` failure substitutes default health values.
-- **Current evidence:** Verified in source; `monitor.env.example` and monitoring overlay contain no `P7_CERT_FILES`.
-- **Missing evidence:** Corrected configuration template and hardened monitor behavior with a fault-injection test.
-- **Exact action required:** Add the missing configuration keys, make non-emitting checks alertable, fix the counter reset, and avoid fail-open fallbacks.
-- **Production authorization required:** No.
+- **Current evidence:** Phase 9.8 adds `P7_CERT_FILES`, additive `P7_CERT_ENDPOINTS`, thresholds and a bounded timeout to both `deploy/monitor.env.example` and `docker-compose.monitoring.yml`; the certificate check supports local public files and explicitly configured TLS endpoints with no DNS/ACME call or private-key read. The time and container checks now fail closed, non-emitting crashing checks produce a visible alert, and the monitor uses a global per-window counter with per-check dedup. `scripts/p98-monitor-isolated-test.sh` reports 37/37 including fault injection and a local synthetic TLS endpoint. Commit `3ace484`.
+- **Missing evidence:** Target-host values for the protected env file, an actually configured certificate source, and an observed alert/heartbeat drill. No real endpoint was contacted in this phase.
+- **Exact action required:** Populate the protected monitor env from approved target values, create the state directory under PB-26, then run the synthetic alert and heartbeat drill before sign-off.
+- **Production authorization required:** No for the repository correction; yes for target-host configuration and installation.
 - **Acceptance criteria:** No unintended `unknown` on a correctly configured host; injected check crash produces an alert; alert cap enforced.
-- **Final status:** **OPEN**
+- **Final status:** **BLOCKED** (repository config/hardening fixed; target-host configuration evidence still required)
 
 ### PB-30 — Scheduled verification does not cover PITR base artifacts
 
 - **Severity:** Medium
 - **Component:** `scripts/backup-scheduler.sh:107-115,168-173`, `scripts/p7-check-pitr.sh`
 - **Description:** The scheduler's `verify` job selects only logical format-3/4 manifests; the PITR check validates age, WAL range, and sidecars but not the base artifact's own SHA-256/size. A corrupted base artifact can therefore pass scheduled verification.
-- **Current evidence:** Verified in source: the logical verifier/retention selection accepts only `backup_format=3|4`, while PITR base sets use `backup_format=pitr-base-1`; WAL pruning reads retained PITR manifests separately, so base artifact content is not covered by the scheduled logical verify path.
-- **Missing evidence:** A scheduled verification path for the PITR base artifact or an owner-approved equivalent manual control.
-- **Exact action required:** Extend verification to PITR base artifacts or document and approve a manual verification gate before relying on PITR.
-- **Production authorization required:** No for repository change; yes for any target-host gate.
+- **Current evidence:** Phase 9.8 added `scripts/verify-pitr-base.sh` and wired it into the scheduler `verify` job. It checks `base_sha256`, `base_bytes`, `SHA256SUMS`, the full multi-line required WAL list, and every WAL sidecar. `scripts/p98-backup-isolated-test.sh` now reports 30/30, including a direct verifier run against a tampered synthetic base that fails closed and names the SHA-256 mismatch. WAL pruning also refuses the same tampered base. Commits `62be9b6`, `f84d358`.
+- **Missing evidence:** None for this repository-only coverage defect. A real target-host PITR base must still pass this verifier under PB-03/PB-11 installation gates.
+- **Exact action required:** Re-run the isolated proof after any verifier change and execute the verifier against the first real target-host base under separate authorization.
+- **Production authorization required:** No for the repository correction; yes for the target-host gate.
 - **Acceptance criteria:** A tampered base artifact is detected by a scheduled or mandatory manual check before deployment.
-- **Final status:** **OPEN**
+- **Final status:** **CLOSED** (repository-only coverage defect; real base verification remains separately BLOCKED under PB-03)
 
 ### PB-31 — Dispatcher unit path mismatch and silent overlap skips
 
 - **Severity:** Medium
 - **Component:** `deploy/clinic-backup-schedule@.service`, `deploy/clinic-monitor.service`, `scripts/backup-scheduler.sh:64-72`
 - **Description:** Backup and monitor units used conflicting repository roots, and the dispatcher had no `[Install]` section, no `OnFailure=`, and treated `flock -n` contention as a successful skip; with `Persistent=true` and 10-minute jitter, a slow job could silently suppress another job's run.
-- **Current evidence:** Phase 9.8 reconciled every active unit to the single approved root `/opt/clinic`, added an `[Install]` section and `OnFailure=` notification target, and made repeated lock contention emit a structured alert and fail closed. Isolated proof: `scripts/p98-backup-isolated-test.sh`.
+- **Current evidence:** Phase 9.8 reconciled every active unit to the single approved root `/opt/clinic`, added an `[Install]` section, an `OnFailure=clinic-backup-alert@%i.service` target and a dedicated journal-only alert unit, and made repeated lock contention emit a structured monitor alert and fail closed. `scripts/p98-backup-isolated-test.sh` proves the overlap path (exit 75 plus structured alert), and `scripts/p97-readiness-preflight.sh` enforces the single root and unit invariants. Commit `62be9b6`.
 - **Missing evidence:** Owner approval of `/opt/clinic` as the target-host checkout root; target-host installation and a scheduled overlap/failure drill.
 - **Exact action required:** Confirm the single root on the target host, install the reconciled units under explicit authorization, and verify that a forced overlap produces a visible alert.
 - **Production authorization required:** No for the plan; yes for target-host installation.
 - **Acceptance criteria:** All units reference one approved path; an overlap skip produces a visible alert or documented acceptable outcome.
-- **Final status:** **OPEN**
+- **Final status:** **BLOCKED** (repository reconciliation proved; owner path approval and target-host drill still required)
 
 ## 3. Counts by status
 
 | Status | Count |
 |---|---:|
-| CLOSED | 2 (PB-23, PB-24) |
-| OPEN | 10 (PB-11, PB-15, PB-22, PB-25–PB-31) |
-| BLOCKED | 19 (PB-01–10, PB-12–14, PB-16–21) |
+| CLOSED | 6 (PB-11, PB-23, PB-24, PB-27, PB-28, PB-30) |
+| OPEN | 2 (PB-15, PB-22) |
+| BLOCKED | 23 (PB-01–10, PB-12–14, PB-16–21, PB-25, PB-26, PB-29, PB-31) |
 | ACCEPTED RISK | 0 |
 
-No Production blocker is CLOSED. The two CLOSED items are documentation/clarification and repository-invariant items only. A repository-only PASS must never be presented as Production readiness.
+No Production blocker is CLOSED on documentation or assumption alone. The six CLOSED items are repository-only corrections with local synthetic evidence; none authorizes a target-host operation. PB-25, PB-26, PB-29 and PB-31 have corrected repository code/config but remain BLOCKED because their own acceptance criteria require target-host values, installation, or an observed drill. A repository-only PASS must never be presented as Production readiness.
 
 ## 4. Sign-off rule
 
 The final acceptance gate remains **PARTIAL** until every BLOCKED item has target-host evidence and every OPEN item has an owner decision. Deployment requires a separate explicit approval after this register is updated with that evidence.
+
+## 5. Phase 9.8 repository remediation changelog
+
+| Commit | Scope | Evidence |
+|---|---|---|
+| `93509a2` | PB-11 — removed unsafe migration-ledger SQL from the live rollback helper, updated the live rollback runbook, and marked the historical Phase M quote as `UNSAFE / SUPERSEDED`. | `scripts/p97-readiness-preflight.sh` fails on an unmarked reintroduction; no `migration.sql` or schema file changed. |
+| `62be9b6` | PB-25/27/28/30/31 — job-specific dispatcher arguments, protected PITR env contract, fail-closed mount and WAL-prune gating, PITR base hash/size verification, single `/opt/clinic` root, `OnFailure` notification, visible overlap alerts. | `bash scripts/p98-backup-isolated-test.sh` (30/30 after the follow-up below); repository preflight PASS. |
+| `3ace484` | PB-26/29 — monitor state ownership model, additive certificate file/endpoint checks, fail-closed time and container checks, global alert cap, crashing-check visibility, config keys in env/compose templates. | `bash scripts/p98-monitor-isolated-test.sh` (37/37) including a disposable Linux-user permission proof and local synthetic TLS endpoint; no real endpoint contacted. |
+| `f84d358` | PB-30 — direct scheduled-verifier proof against a tampered PITR base artifact. | Isolated verifier exits non-zero and reports `SHA-256 mismatch`; backup suite result becomes 30/30. |
+| final documentation commit | Register statuses/counts, live runbooks, and `docs/PRODUCTION_READINESS_PHASE9_8.md`. | Repository-only report; no target-host or CI claim. |
+
+All commits are local on `fix/phase9-8-operational-defects`. Nothing was pushed, no PR or merge was created, `main` was not modified, and no unit, timer, cron job, or external notification was installed or enabled.
