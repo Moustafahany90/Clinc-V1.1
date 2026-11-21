@@ -5,6 +5,7 @@ import { getClinicSettings } from './lib/clinic.js';
 import { clinicTimezoneName } from './lib/time.js';
 import { log } from './lib/logger.js';
 import { ensureStorage } from './modules/files/routes.js';
+import { closeHtmlPdfBrowser } from './lib/htmlPdf.js';
 
 async function main(): Promise<void> {
   await ensureStorage();
@@ -23,9 +24,13 @@ async function main(): Promise<void> {
     });
   });
 
+  let shuttingDown = false;
   const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     log('info', 'api.shutting_down', { message: 'shutting down', signal });
     server.close(() => undefined);
+    await closeHtmlPdfBrowser().catch(() => undefined);
     await prisma.$disconnect().catch(() => undefined);
     setTimeout(() => process.exit(0), 5_000).unref();
   };

@@ -37,6 +37,11 @@ const schema = z.object({
   UPLOAD_DIR: z.string().default('./storage/uploads'),
   MAX_UPLOAD_MB: int(25, 1, 200),
 
+  /** Chromium renderer controls: hard timeout and bounded concurrency/queue. */
+  PDF_RENDER_TIMEOUT_MS: int(30_000, 1, 300_000),
+  PDF_MAX_CONCURRENT_RENDERS: int(2, 1, 16),
+  PDF_MAX_QUEUE_SIZE: int(4, 0, 64),
+
   EVOLUTION_API_ENABLED: bool(false),
   EVOLUTION_API_URL: z.string().default(''),
   EVOLUTION_API_KEY: z.string().optional().default(''),
