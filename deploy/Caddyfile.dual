@@ -1,0 +1,100 @@
+# Dual-access HTTPS front door for Clinic-V1.1.
+#
+# Serves both Tailscale (remote) and LAN (clinic Wi-Fi / Ethernet) clients
+# over HTTPS from a single Caddy instance.
+#
+# Usage:
+#   docker compose -f docker-compose.yml \
+#     -f docker-compose.tailscale.yml \
+#     -f docker-compose.lan.yml up -d --build
+#
+# Two site blocks, each with its own TLS source:
+#   1. Tailscale:  https://<CLINIC_DOMAIN>  — Tailscale-issued certificate
+#   2. LAN:        https://<LAN_HOST>       — Caddy internal CA (tls internal)
+#
+# The global `auto_https disable_redirects` disables Caddy's default HTTP
+# listener and redirect (no port 80). The `tls internal` directive explicitly
+# generates a self-signed certificate from Caddy's built-in PKI for the LAN site
+# block; this does not use ACME.
+#
+# APP_ORIGIN must include both HTTPS origins (comma-separated) so the backend
+# CORS whitelist accepts requests from either entry point. COOKIE_SECURE=true
+# is satisfied because both paths use HTTPS.
+#
+# To trust the internal CA on clinic devices, export the root certificate:
+#   docker compose exec caddy caddy trust        # (installs on the host)
+#   docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt
+# Then install that root certificate on each clinic phone/PC.
+{
+	auto_https disable_redirects
+	admin 127.0.0.1:2019
+	default_sni {$LAN_HOST}
+
+	# Caddy's internal PKI authority. The `local` CA is the default used by
+	# `tls internal`. Declaring it here makes the authority name explicit and
+	# avoids relying on undocumented defaults.
+	pki {
+		ca local {
+			name "Clinic Internal CA"
+		}
+	}
+}
+
+# --- Tailscale site (remote access) -----------------------------------------
+# Uses pre-issued Tailscale certificates. Reachable only via Tailscale tunnel
+# because Compose binds this port to TAILSCALE_IP.
+
+https://{$CLINIC_DOMAIN} {
+	encode zstd gzip
+	# TAILSCALE_CERT_DIR is the host path used by the Compose bind mount.
+	# Inside this container that directory is always mounted at
+	# /etc/tailscale/certs, so use the fixed container path here.
+	tls /etc/tailscale/certs/{$CLINIC_DOMAIN}.crt /etc/tailscale/certs/{$CLINIC_DOMAIN}.key
+
+	# Logging-only redaction. Strip everything from the first '?' in the logged
+	# request URI and delete credential headers. No routing, header, TLS or
+	# proxy behaviour is changed.
+	log {
+		format filter {
+			wrap json
+			request>uri regexp \?.* ""
+			request>headers>Authorization delete
+			request>headers>Cookie delete
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+	reverse_proxy web:80 {
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+# --- LAN site (clinic local access) -----------------------------------------
+# Uses Caddy's internal CA to generate a TLS certificate for the LAN host.
+# Reachable from the clinic's Wi-Fi and Ethernet network because Compose binds
+# this port to LAN_IP.
+#
+# LAN_HOST can be an IP address (e.g. 192.168.1.11) or a local hostname
+# (e.g. clinic.local). Caddy's internal CA issues certificates with IP SANs
+# when the host value is an IP address.
+
+https://{$LAN_HOST} {
+	encode zstd gzip
+	tls internal
+
+	log {
+		format filter {
+			wrap json
+			request>uri regexp \?.* ""
+			request>headers>Authorization delete
+			request>headers>Cookie delete
+		}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+	reverse_proxy web:80 {
+		header_up X-Real-IP {remote_host}
+	}
+}

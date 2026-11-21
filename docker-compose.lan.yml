@@ -1,0 +1,40 @@
+# LAN access overlay. Use together with the base and Tailscale overlays:
+#
+#   docker compose -f docker-compose.yml \
+#     -f docker-compose.tailscale.yml \
+#     -f docker-compose.lan.yml config --quiet
+#
+#   docker compose -f docker-compose.yml \
+#     -f docker-compose.tailscale.yml \
+#     -f docker-compose.lan.yml up -d --build
+#
+# This overlay extends the Tailscale Caddy service to also listen on the
+# server's LAN IP, serving clinic devices (phones, PCs) over HTTPS using
+# Caddy's internal CA. It replaces the Tailscale-only Caddyfile with the
+# dual-access Caddyfile that serves both Tailscale and LAN site blocks.
+#
+# Required .env additions (non-secret):
+#   LAN_IP=192.168.1.11          # Server's LAN IPv4 (from `ip -4 addr show eno1`)
+#   LAN_HOST=192.168.1.11        # Hostname or IP for the LAN site block
+#   APP_ORIGIN=https://<CLINIC_DOMAIN>,https://<LAN_HOST>
+#
+# No existing service binds are changed. The database, backend, and evolution
+# services remain on loopback / internal bridge only.
+
+services:
+  caddy:
+    environment:
+      LAN_HOST: ${LAN_HOST:?set LAN_HOST in .env}
+    ports:
+      # LAN listener: same port 443 on the server's LAN interface.
+      # Docker allows multiple host_ip:port mappings to the same container port
+      # as long as the host IPs are different.
+      - target: 443
+        published: "443"
+        protocol: tcp
+        host_ip: ${LAN_IP:?set LAN_IP in .env}
+    volumes:
+      # Override the Tailscale-only Caddyfile with the dual-access Caddyfile.
+      # The Tailscale cert mount from docker-compose.tailscale.yml is preserved
+      # because Compose merges volume lists.
+      - ./deploy/Caddyfile.dual:/etc/caddy/Caddyfile:ro
