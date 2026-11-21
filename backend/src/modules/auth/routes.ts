@@ -15,7 +15,12 @@ import { parseBody } from '../../lib/validate.js';
 import { asyncHandler } from '../../lib/errors.js';
 import { authenticate, currentUser, requirePermission } from '../../middleware/auth.js';
 import { hasPermission } from '../../lib/permissions.js';
-import { loginLimiter, passwordSetupLimiter, refreshLimiter } from '../../middleware/rateLimit.js';
+import {
+  loginAccountLimiter,
+  loginLimiter,
+  passwordSetupLimiter,
+  refreshLimiter,
+} from '../../middleware/rateLimit.js';
 import { AUTH_USER_SELECT, publicUser } from '../../lib/authTypes.js';
 import { auditFromRequest } from '../../lib/audit.js';
 
@@ -77,6 +82,7 @@ const loginSchema = z.object({
 authRouter.post(
   '/login',
   loginLimiter,
+  loginAccountLimiter,
   asyncHandler(async (req, res) => {
     const { email, password } = parseBody(loginSchema, req);
     const user = await prisma.user.findUnique({ where: { email } });

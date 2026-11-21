@@ -7,6 +7,7 @@ import { dateOnlySchema, parseBody, parseParams, parseQuery, uuidSchema } from '
 import { authenticate, currentUser, requirePermission } from '../../middleware/auth.js';
 import { auditFromRequest } from '../../lib/audit.js';
 import { hasPermission } from '../../lib/permissions.js';
+import { acquireQueueAllocationLock, allocateQueuePosition } from '../../lib/queueLock.js';
 import { bookingPaymentSchema, recordServiceRevenue } from '../payments/billing.js';
 import type { QueueStatus } from '@prisma/client';
 
@@ -272,11 +273,25 @@ queueRouter.post(
     const durationMinutes = payload.durationMinutes ?? service?.durationMinutes ?? 15;
 
     const now = new Date();
-    const existingToday = await prisma.queueEntry.count({
-      where: { queueDate: dateOnlyToDb(clinicDateString()), doctorId: doctor.id },
-    });
+    // Capture the clinic-local day once so the queue identity, the database
+    // queueDate and the lock key cannot disagree at a midnight boundary.
+    const queueDateOnly = clinicDateString();
+    const queueDate = dateOnlyToDb(queueDateOnly);
 
     const result = await prisma.$transaction(async (tx) => {
+      // The appointment exclusion constraint uses a GiST index. Concurrent
+      // inserts for the same doctor can deadlock (SQLSTATE 40P01) while their
+      // share locks intersect, which surfaces as HTTP 500. Serialising the
+      // per-doctor queue window with a transaction-scoped advisory lock keeps
+      // the race deterministic: one insert wins, the rest fail with 23P01 and
+      // are mapped to 409 APPOINTMENT_CONFLICT by the error handler.
+      //
+      // Q-1: the position is read and allocated INSIDE this locked critical
+      // section, never before it, so every writer observes the positions
+      // committed by all earlier writers for the same doctor and date.
+      await acquireQueueAllocationLock(tx, doctor.id, queueDateOnly);
+      const position = await allocateQueuePosition(tx, doctor.id, queueDate);
+
       const appointment = await tx.appointment.create({
         data: {
           patientId: patient.id,
@@ -305,10 +320,10 @@ queueRouter.post(
           appointmentId: appointment.id,
           patientId: patient.id,
           doctorId: doctor.id,
-          queueDate: dateOnlyToDb(clinicDateString()),
+          queueDate,
           status: 'WAITING',
           arrivedAt: now,
-          position: existingToday + 1,
+          position,
           createdById: me.id,
         },
         include: queueInclude,

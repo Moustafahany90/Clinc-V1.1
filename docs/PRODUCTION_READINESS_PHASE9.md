@@ -1,0 +1,446 @@
+# Production Readiness — Phase 9
+
+**Repository:** Clinc-V1.1
+**Branch:** `feature/phase9-performance`
+**Base HEAD:** `e55119fd8067316ebc4af23d93c468f399a7efc6` (`main` / `origin/main` before Phase 9)
+**Date:** 2026-11-21
+**Scope:** Measure performance, concurrency, query plans, rate limiting, PDF/Chromium behavior, and container resource behavior using only synthetic `P9-` data and disposable `p9*` resources. Evidence and recommendations only.
+**Decision gate:** One application-level defect was verified. No application source, schema, migration, index, Compose, CI, Dockerfile, or dependency was changed. Owner approval is required before any remediation.
+
+---
+
+## 1. Executive summary
+
+Phase 9 completed the planned measurements on a deterministic 20k-patient / 60k-appointment synthetic dataset. The principal results are:
+
+| Area | Verdict | Key measured result | Severity |
+|---|---|---|---|
+| Concurrent queue walk-in | **Verified defect** | 6 simultaneous walk-ins: 1 success, **5 HTTP 500 `INTERNAL`**. PostgreSQL `23P01` exclusion violation is wrapped by Prisma and missed by `errorHandler`, so the client receives 500 instead of 409 `APPOINTMENT_CONFLICT`. No data corruption observed. | **High** |
+| Financial statement / mixed read load | **Confirmed risk** | Statement endpoint returns **3,780,333 bytes** at p50 508.41 ms; 8-worker mixed load produced p95 **2,291.42 ms**, p99 **2,402.39 ms**, event-loop drift p95 **4,981.14 ms**, while DB connections peaked at 13. | **High** |
+| PDF/Chromium | **Confirmed risk** | One shared Chromium, no render timeout/semaphore/abort. 6 concurrent 250-row synthetic renders: p50 **353.78 ms**, p95 **382.75 ms**, 3–4 Chromium processes, summed RSS peak **332,128,256 bytes**. A harness-side 100 ms timeout did not stop the render. | **Medium–High** |
+| Rate limiting | **Config confirmed; topology risk** | Login limiter: 10×401 then 429 with `Retry-After: 900`; API limiter: first 429 at request 601, 3 throttled of 603. All limiters key on `req.ip`; NAT/shared IP risk is real. | **Medium** |
+| Container limits | **Confirmed absent** | `docker-compose.yml` has no CPU/memory keys; all four `ultrasound-clinic-*` containers and `p9-postgres` report `memory=0`, `nanoCpus=0`, `cpuQuota=0`. A disposable capped `p9-oom-probe` was OOM-killed in 603 ms (exit 137) and `p7-check-containers` correctly emitted critical. | **Medium–High** |
+| Query plans | **Partially confirmed** | Case-insensitive duplicate lookup scans 20,000 rows (7.299 ms); finance allocation aggregate 29.279 ms; monthly refund scan removes 4,724 rows. Six transient `P9_*` index trials in `clinic_p9_drill` improved several plans and were dropped. | **Medium** |
+| Generic concurrency invariants | **Mostly clean** | Refund cap, report-per-visit, allocation cap, void-vs-allocation, appointment slot uniqueness, and payment idempotency all preserved invariants. No `P2028` observed in these Phase 9 runs. | Informational |
+| Setup advisory lock scope | **Not measured** | Constant `918273645` remains a static-only finding; no contention probe was run. | Not tested |
+
+No remediation was applied. The verified queue defect and the other risks are presented for owner decision.
+
+---
+
+## 2. Safety and scope confirmation
+
+- `main` was never committed or pushed to. Phase 9 work stayed on `feature/phase9-performance`.
+- An external `git pull` moved `main`; the feature branch was advanced only with `git merge --ff-only main`.
+- Only these repository paths were written:
+  - `backend/tests/perf/**`
+  - `scripts/p9-*.mjs`
+  - `docs/PRODUCTION_READINESS_PHASE9.md` (this report)
+- No changes to `backend/src`, Prisma schema/migrations, indexes, Compose, CI, Dockerfiles, or dependencies.
+- No production access, real patient data, real WhatsApp/Telegram/heartbeat calls, or external network use beyond the already-cached `postgres:16.4-alpine` and `node:22-alpine` images.
+- Only synthetic `P9-` data was generated. All API probe identities, emails, markers, and XFF addresses were TEST-NET or synthetic.
+- Disposable resources used:
+  - Container `p9-postgres`, image `postgres:16.4-alpine`, `127.0.0.1:55437`, user `p9_app`, databases `clinic_p9_test` and `clinic_p9_drill`.
+  - Container `p9-oom-probe`, image cached `node:22-alpine`, created and deleted by `scripts/p9-container-drill.mjs`.
+- Existing containers `ultrasound-clinic-db-1`, `ultrasound-clinic-backend-1`, `ultrasound-clinic-web-1`, and `ultrasound-clinic-evolution-1` were inspected read-only and left running and unchanged.
+- Evidence files were written outside the repository under `C:/Users/Moustafa/AppData/Local/Temp/opencode/p9/out/`.
+
+---
+
+## 3. Method and dataset
+
+Pre-measurement hypotheses were recorded in `backend/tests/perf/p9-hypotheses.md` before any EXPLAIN, load, concurrency, PDF, rate-limit, or container-limit measurement. Decision rules in that file were followed: a hypothesis is confirmed only by harness output.
+
+Synthetic seed `9112026` was generated by `backend/tests/perf/p9-seed.mjs` with fixed scrypt salts and synthetic password `P9-Synthetic-Pass!`. Final counts in `clinic_p9_test`:
+
+| Model | Rows |
+|---|---:|
+| Patient | 20,000 |
+| Appointment | 60,000 |
+| QueueEntry | 30,000 |
+| Expense | 20,000 |
+| Charge | 60,000 |
+| Payment | 60,000 |
+| PaymentAllocation | 48,000 |
+| Refund | 5,400 |
+| Visit | 30,000 |
+| Measurement | 60,000 |
+| Report | 30,000 |
+| ReportVersion | 60,000 |
+| FileAsset | 100,000 |
+| AuditLog | 200,000 |
+
+Seed validation reported 0 allocation/refund/charge violations, 0 settled charges without allocation, 0 open/void charges with allocation, and all markers synthetic. `ANALYZE` was run on both test databases. Eight migrations were applied; 43 public CHECK constraints were validated.
+
+Evidence artifacts:
+
+| File | Content |
+|---|---|
+| `.../p9/out/seed.json` | Dataset counts and timing |
+| `.../p9/out/explain-baseline.json` | `clinic_p9_test` baseline plans |
+| `.../p9/out/explain-drill-baseline.json` | `clinic_p9_drill` baseline plans |
+| `.../p9/out/explain-drill-indexes.json` | Transient proposed-index plans; indexes dropped afterward |
+| `.../p9/out/concurrency.json` | Seven concurrency scenarios and invariants |
+| `.../p9/out/load.json` | Endpoint percentiles, mixed load, rate-limit probes |
+| `.../p9/out/pdf.json` | PDF/Chromium latency, processes, RSS, abort probe |
+| `.../p9/out/container.json` | Compose/runtime limit audit, OOM drill, `p7-check-containers` output |
+
+---
+
+## 4. Verified defect — queue walk-in returns 500 instead of 409
+
+### 4.1 Reproduction
+
+From `backend/`, against `clinic_p9_test`, with a fresh per-run synthetic doctor:
+
+```text
+node --test --test-concurrency=1 --import tsx tests/perf/p9-concurrency.test.mjs
+```
+
+Scenario `queue_walkin_position` fired 6 concurrent walk-in requests for the same synthetic doctor/patient slot.
+
+Result from `.../p9/out/concurrency.json`:
+
+```text
+successes: 1 / attempts: 6
+classifications: 201:NONE = 1, 500:INTERNAL = 5
+queueEntries: 1
+positions: [1]
+duplicatePositions: []
+```
+
+The data invariant held: only one queue entry with position 1 was persisted. The failure was in error classification, not data corruption.
+
+### 4.2 Cause
+
+Each failed response contained:
+
+```text
+PrismaClientUnknownRequestError
+Invalid `tx.appointment.create()` invocation in
+backend/src/modules/queue/routes.ts:280:48
+ConnectorError(... PostgresError {
+  code: "23P01",
+  message: "conflicting key value violates exclusion constraint \"appointment_no_doctor_overlap\""
+})
+```
+
+`backend/src/middleware/error.ts:70-80` maps a top-level `err.code === '23P01'` to HTTP 409 `APPOINTMENT_CONFLICT`. In this path the PostgreSQL code is nested inside the Prisma wrapper, so the top-level `dbCode` check does not match and the request falls through to the 500 `INTERNAL` response at `error.ts:99-105`.
+
+By comparison, the separate `appointment_slot_uniqueness` scenario returned the expected 5×409 `CONFLICT` and 1×201, with only one persisted appointment. That confirms the exclusion constraint itself is working and the problem is specific to how the queue walk-in error surfaces.
+
+### 4.3 Classification and recommendation
+
+- **Severity:** High. A normal conflict is reported as a server error, which can trigger alert noise, retries, and misleading client behavior. No invariant damage was measured.
+- **Recommendation for owner:** map the wrapped `23P01` cause to 409 `APPOINTMENT_CONFLICT` and/or make the queue walk-in conflict path deterministic without relying on raw exclusion-error translation. Do not deploy until reviewed. No code change was made here.
+
+---
+
+## 5. Concurrency results
+
+`backend/tests/perf/p9-concurrency.test.mjs` ran 7 scenarios with one test worker. Final result: 6 pass, 1 fail (the verified queue defect above).
+
+| Scenario | Result | Evidence |
+|---|---|---|
+| Refund overspend | 1×201; 7×400 `BAD_REQUEST`; persisted 1 refund of 10,000 minor units | Cap enforced |
+| Report per visit | 1×201; 7×409 `CONFLICT`; persisted 1 report | Single-report invariant held |
+| Charge allocation cap | 1×201; 7×400; allocated 10,000; final charge `SETTLED` | Cap enforced |
+| Void vs allocation | 6 rounds; payment 201, void 400, charge `SETTLED`, allocation total 5,000 every round | No violations |
+| Appointment slot uniqueness | 1×201; 5×409; persisted 1 | 23P01 classified correctly on this path |
+| Payment idempotency | 1×201; 7×409 `DUPLICATE`; `rawP2002 = 0`; persisted 1 | No raw Prisma code leak |
+| Queue walk-in | 1×201; 5×500 `INTERNAL` | **Verified defect**, §4 |
+
+Phase 3 previously recorded `P2028` under eight-way contention. These Phase 9 runs did not observe `P2028`; no application transaction timeout was added, so that historical risk remains documented but not reproduced here.
+
+---
+
+## 6. Query-plan results
+
+### 6.1 Baseline signals (`clinic_p9_test`)
+
+Key EXPLAIN `(ANALYZE, BUFFERS)` results:
+
+| Query | Execution | Scans / buffers | Interpretation |
+|---|---:|---|---|
+| `patient_search_contains_insensitive` | 0.207 ms | 1 index scan, 42 buffers | `ILIKE '%…%'` is not the dominant cost at this size |
+| `patient_duplicate_equals_insensitive` | 7.299 ms | 1 seq scan, 1 sort, 1,098 buffers, 19,980 rows removed | Case-insensitive duplicate lookup scans all 20k patients |
+| `finance_position_charges` | 8.931 ms | seq scan, 2,450 buffers | All-time aggregate scans the charge table |
+| `finance_position_payments` | 7.907 ms | seq scan, 1,968 buffers | All-time aggregate scans payments |
+| `finance_position_allocations` | 29.279 ms | 2 seq scans, 6,538 buffers | Most expensive finance aggregate |
+| `finance_monthly_payments` | 1.686 ms | index scan, returned 7,433 rows | Date-range payments use an existing index |
+| `finance_monthly_refunds` | 0.506 ms | seq scan, 4,724 rows removed | Small absolute at 5.4k refunds, but scales poorly |
+| `appointments_by_doctor_range` | 2.490 ms | index scan, 197 buffers read, 3,754 rows removed | Doctor agenda reads a broad index slice |
+| `report_versions_by_report` | 0.087 ms | index scan, 13 buffers | Existing `[reportId, createdAt]` index is used |
+
+### 6.2 Drill with transient proposed indexes
+
+`backend/tests/perf/p9-explain.mjs clinic_p9_drill --with-proposed-indexes` created six `P9_*` indexes only in `clinic_p9_drill`; all six were dropped in `finally` after measurement. Comparing drill baseline to drill-with-indexes:
+
+| Query | Drill baseline | With transient indexes | Notes |
+|---|---:|---:|---|
+| `finance_monthly_refunds` | 0.858 ms, seq scan, 4,724 rows removed, 94 buffers hit | **0.228 ms**, index scan, 12 hit / 4 read | `P9_Refund_refundedAt_idx` explains the plan change |
+| `patient_ledger_payments` | 1.908 ms, seq scan + sort | **0.188 ms**, index scan + nested loop | `P9_Refund_paymentId_idx` explains the plan change |
+| `measurements_by_visit_measured_at` | 0.136 ms, sort | **0.069 ms** | `P9_Measurement_visitId_measuredAt_idx` used |
+| `files_by_patient_recent` | 0.241 ms, sort | **0.075 ms** | `P9_FileAsset_patientId_createdAt_idx` used |
+| `report_versions_by_report` | 0.209 ms, sort | **0.079 ms** | `P9_Report_visitId_createdAt_idx` used; see static correction below |
+| `appointments_by_doctor_range` | 4.521 ms, 197 buffers read | **1.560 ms**, 197 buffers hit | No appointment index was proposed; this is consistent with a warm cache, not an index benefit |
+
+### 6.3 Static correction
+
+An earlier static audit claimed `ReportVersion` lacked `[reportId, createdAt]`. The current schema already has `@@index([reportId, createdAt])` at `backend/prisma/schema.prisma:502`. No index was added for it; the drill tested a transient duplicate index only to observe the plan, then dropped it.
+
+### 6.4 Recommendation
+
+- Owner decision required before adding any persistent index.
+- Highest-value candidates from measured plans: standalone `Refund(refundedAt)` and `Refund(paymentId)`, plus composite `Measurement(visitId, measuredAt)` and `FileAsset(patientId, createdAt)`.
+- The case-insensitive duplicate lookup and all-time finance aggregates need application-level query changes (bounds/snapshots/case-normalized access), not indexes alone. No such change was made.
+
+---
+
+## 7. Endpoint latency, mixed load, and rate limits
+
+Harness: `backend/tests/perf/p9-load.mjs`, in-process Express app on an ephemeral loopback port, synthetic admin JWT, synthetic XFF IPs.
+
+### 7.1 Single-endpoint percentiles
+
+| Endpoint | p50 | p95 | p99 | p50 response |
+|---|---:|---:|---:|---:|
+| `GET /patients?search=P9First&page=1&pageSize=20` | 53.72 ms | 55.49 ms | 55.84 ms | 7,473 B |
+| `GET /patients/:id/ledger` | 13.65 ms | 20.12 ms | 20.89 ms | 1,744 B |
+| `GET /financial-reports/position` | 31.09 ms | 33.32 ms | 33.62 ms | 211 B |
+| `GET /financial-reports/monthly?year=2022&month=6` | 31.92 ms | 40.38 ms | 40.72 ms | 4,033 B |
+| `GET /financial-reports/statement?from=2022-01-01&to=2022-12-31` | **508.41 ms** | **529.34 ms** | **532.75 ms** | **3,780,333 B** |
+
+All five series had 5 requests and 0 errors. The annual statement is both the slowest and the only multi-megabyte response, confirming H1/H7 for the unbounded export shape.
+
+### 7.2 Mixed read load
+
+Configuration: 8 workers × 15 iterations = 120 requests across the five endpoints above.
+
+```text
+errors: 0
+wall: 8,977 ms
+throughput: 13.37 requests/s
+p50: 126.77 ms
+p95: 2,291.42 ms
+p99: 2,402.39 ms
+max: 2,404.60 ms
+Node RSS: 385,339,392 B start -> 791,703,552 B peak -> 672,473,088 B end
+max DB connections: 13
+event-loop drift p95: 4,981.14 ms
+event-loop drift max: 5,162.11 ms
+```
+
+The p95/p99 tail is roughly 18× the median and aligns with the large statement responses in the mix. The event-loop drift indicates blocking work during response construction/serialization. No request errors occurred and PostgreSQL connections stayed at 13, so this is a latency/resource issue rather than a connection-pool failure. **Severity: High** for user-visible tail latency under ordinary concurrent report reads.
+
+### 7.3 Rate limiters
+
+Login limiter, synthetic IP `198.51.100.200`, with a different synthetic IP as control:
+
+```text
+statuses: 401 × 10, then 429
+first response: RateLimit limit=10, remaining=9, reset=900
+throttled response: RateLimit limit=10, remaining=0, reset=900; Retry-After: 900
+different IP: 401 (not throttled)
+```
+
+API limiter, synthetic IP `198.51.100.210`:
+
+```text
+603 requests -> 600 ok, 3 throttled
+first 429 at request 601
+RateLimit limit=600, remaining=0, reset=60; Retry-After: 60
+```
+
+The configured values behave as declared (`login 10/15 min`, `api 600/min`). However, `backend/src/middleware/rateLimit.ts` keys every limiter on `req.ip`, and the documented topology is Caddy → nginx → Express with `TRUST_PROXY=1`. A NATed staff group shares one quota; if any proxy layer can be bypassed, XFF can influence the key. **Recommendation:** owner approval needed before changing proxy trust boundaries or adding authenticated/user-scoped limiter keys.
+
+---
+
+## 8. PDF / Chromium behavior
+
+### 8.1 Production path
+
+Static audit of `backend/src` shows exactly one production route that reaches Chromium:
+
+```text
+POST /api/v1/reports/:id/whatsapp
+  -> renderReportPdf()
+     -> renderGyn4dPdf()   (printLayout='gyn4d')   -> renderHtmlToPdf()
+     -> renderBlocksPdf()  (printLayout='blocks')  -> renderHtmlToPdf()
+     -> pdfkit fallback (other layouts, no Chromium)
+```
+
+`GET /reports/:id/print-html`, `GET /reports/:id/document`, and template preview endpoints render HTML only. The WhatsApp route is protected by `reportDeliveryLimiter` (20/10 min per IP), Bearer auth, `REPORTS_SEND`, `assertClinicalRead`, consent, non-draft status, and provider configuration.
+
+`backend/src/lib/htmlPdf.ts` has one module-level `browserPromise`, `newContext()` per render, `page.route()` blocking all non-`data:` requests, `setContent(..., {waitUntil:'load'})`, and `page.pdf()`. It has no render timeout, `AbortSignal`, semaphore/queue, production shutdown call, or per-render cancellation. `closeHtmlPdfBrowser()` exists but is used only by tests/short-lived scripts; `backend/src/index.ts:26-34` closes the HTTP server and Prisma but not Chromium.
+
+### 8.2 Measurement
+
+Harness: `backend/tests/perf/p9-pdf.mjs`, direct call to the production `renderHtmlToPdf()` with self-contained synthetic `P9-` HTML (250 rows, no external URLs, JavaScript disabled by renderer). It makes no DB/API/provider/network calls and calls `closeHtmlPdfBrowser()` in `finally`.
+
+Method note: an initial synchronous `Get-CimInstance` process sampler inflated latency to about 15 s per render and was discarded. Final numbers use asynchronous `Get-Process` sampling every 250 ms; the discarded run is not used as evidence.
+
+```text
+sequential (3 renders): p50 169.72 ms, p95 174.68 ms, p99 175.12 ms, max 175.23 ms
+PDF bytes per render: 55,911
+6 concurrent renders:  p50 353.78 ms, p95 382.75 ms, p99 383.09 ms, max 383.18 ms
+6-render wall time:    383.36 ms
+Chromium processes:    3-4 concurrently; 7 PIDs observed over the run
+Chromium summed RSS peak: 332,128,256 bytes
+Node RSS: 63,467,520 B start -> 154,189,824 B peak/end
+event-loop drift p95: 244.95 ms; max 245.29 ms
+```
+
+Six concurrent renders completed in 383.36 ms versus an estimated ~1,018 ms for six sequential renders at the measured median, so throughput improves, but each individual request latency roughly doubles. The shared browser/context-per-render design is a bottleneck rather than a failure at this small document size; larger real reports have no render timeout or admission control.
+
+Abort probe:
+
+```text
+harness timeout: 100 ms
+timed out before renderer finished: true
+renderer continued to completion: true
+completion: 369.99 ms, 140,107 bytes
+production renderer accepts AbortSignal: false
+```
+
+This confirms H3. **Severity: Medium–High** because it is an unbounded shared resource on a delivery path. **Recommendation:** owner decision on a render timeout, bounded concurrency, cancellation support, and production shutdown cleanup. No code change was made.
+
+---
+
+## 9. Container and runtime resource behavior
+
+### 9.1 Static and runtime audit
+
+`scripts/p9-container-drill.mjs` inspected `docker-compose.yml` and ran read-only `docker inspect` on the four production-like containers and `p9-postgres`.
+
+```text
+docker-compose.yml resource keys found: []
+production and p9 containers: memory=0, nanoCpus=0, cpuShares=0,
+                              cpuQuota=0, cpuPeriod=0
+OOMKilled=false on all inspected live containers
+ultrasound-clinic-evolution-1: restartCount=1 (pre-existing, not caused by Phase 9)
+```
+
+`docker-compose.yml` does bound JSON log growth with `max-size: 10m`, `max-file: 5`; that is disk-log retention, not a memory/CPU limit. No `NODE_OPTIONS=--max-old-space-size` was found in the repository.
+
+`scripts/p7-check-containers.sh` checks OOM kills, non-running state, health, and restart deltas. It does **not** inspect `HostConfig.Memory`, `NanoCpus`, `CpuQuota`, or `deploy.resources`; it cannot warn that limits are absent.
+
+### 9.2 Disposable OOM drill
+
+The drill printed its exact creation target before starting:
+
+```text
+CREATE TARGET: container p9-oom-probe (image node:22-alpine)
+```
+
+Configuration and result:
+
+```text
+image: node:22-alpine (already cached; no pull)
+network: none
+limits: memory=50,331,648 B, memorySwap=50,331,648 B,
+        cpuQuota=0, cpuPeriod=0, pidsLimit=64
+workload: in-container Buffer.alloc loop
+result after 603 ms: OOMKilled=true, exitCode=137, restarts=0
+```
+
+`p7-check-containers.sh` was invoked with `P7_COMPOSE_PROJECT=p9` and a throwaway `P7_STATE_DIR`/`P7_ALERT_SINK`. It emitted:
+
+```text
+container:p9-oom-probe  status=critical  "container was OOM-killed"  oomKilled=true
+container:p9-postgres   status=ok        "container healthy"        oomKilled=false
+containers              status=critical  worst=critical
+exit code 3
+```
+
+Cleanup printed and removed only `p9-oom-probe` and its generated temp directory. Final `docker ps -a --filter name=p9` shows only `p9-postgres`. No `ultrasound-clinic-*` resource was modified.
+
+**Severity: Medium–High.** The OOM kill is predictable when a cap exists; without caps, an unbounded process can exhaust the host before any health check reacts. **Recommendation:** owner decision on explicit memory/CPU limits, a documented vCPU/RAM minimum, and a Node heap cap. No Compose or runtime file was changed.
+
+---
+
+## 10. Findings by original hypothesis
+
+| Hypothesis | Verdict | Basis |
+|---|---|---|
+| H1 — unbounded financial reads | Confirmed | 3.78 MB statement response, 508 ms p50, 2.29 s p95 under mixed load; all-time aggregates scan full tables |
+| H2 — advisory-lock contention / P2028 | Partially confirmed | Most locks and invariants held; no `P2028` in these runs; queue path produced misclassified 500 |
+| H3 — shared Chromium bottleneck / no abort | Confirmed | 6 concurrent renders doubled per-request latency; 3–4 processes, 317 MiB summed RSS; 100 ms harness timeout did not cancel |
+| H4 — IP-keyed rate limiters / NAT risk | Config confirmed; topology risk | Exact 10-attempt login cutoff and 601st API request cutoff; XFF/proxy trust path remains a deployment risk |
+| H5 — missing indexes / poor plans | Partially confirmed | Seq scans and row removals measured; transient indexes improved specific plans; `ReportVersion` index already existed |
+| H6 — TOCTOU pre-check races | Confirmed for queue; otherwise clean | Appointment slot and idempotency paths returned deterministic 409; queue walk-in returned 500 via wrapped 23P01 |
+| H7 — all-time/large export memory | Confirmed | 3.78 MB response and 406 MB Node RSS growth during mixed load |
+| H8 — no container/Node resource caps | Confirmed | Static keys absent; runtime limits zero; disposable capped container OOM-killed in 603 ms |
+| H9 — global setup advisory lock | Not tested | Static-only; no contention probe run |
+
+---
+
+## 11. Owner decisions requested
+
+1. **Approve or decline remediation for the verified queue walk-in 500** (§4). Recommended: map wrapped `23P01` to 409 `APPOINTMENT_CONFLICT` and make the conflict path deterministic.
+2. **Approve or decline financial-read changes** (§6.4, §7): bounded date ranges, snapshot reads, or streaming/pagination for the annual statement.
+3. **Approve or decline PDF/Chromium controls** (§8.2): render timeout, concurrency cap, cancellation, and shutdown cleanup.
+4. **Approve or decline persistent indexes** (§6.2): `Refund(refundedAt)`, `Refund(paymentId)`, `Measurement(visitId, measuredAt)`, `FileAsset(patientId, createdAt)`; correct any stale static index inventory.
+5. **Approve or decline rate-limit key/proxy changes** (§7.3).
+6. **Approve or decline container/Node resource caps** (§9).
+
+Phase 9 stops here. No fix, commit to `main`, push, PR, deploy, or Phase 10 work was performed.
+
+---
+
+## 12. Repro commands
+
+From repository root:
+
+```text
+git checkout feature/phase9-performance
+docker run -d --name p9-postgres -p 127.0.0.1:55437:5432 \
+  -e POSTGRES_DB=clinic_p9_test -e POSTGRES_USER=p9_app \
+  -e POSTGRES_PASSWORD=P9SyntheticPass123 postgres:16.4-alpine
+```
+
+From `backend/`, with `DATABASE_URL` pointed at `clinic_p9_test`:
+
+```text
+node tests/perf/p9-seed.mjs clinic_p9_test
+node tests/perf/p9-explain.mjs clinic_p9_test
+node --import tsx tests/perf/p9-load.mjs
+node --test --test-concurrency=1 --import tsx tests/perf/p9-concurrency.test.mjs
+node --import tsx tests/perf/p9-pdf.mjs
+```
+
+Index drill, only against the disposable drill database:
+
+```text
+node tests/perf/p9-explain.mjs clinic_p9_drill --with-proposed-indexes
+```
+
+From repository root:
+
+```text
+node scripts/p9-container-drill.mjs
+```
+
+The container drill prints exact create/delete targets and refuses to replace a pre-existing `p9-oom-probe`. All harnesses write evidence to `P9_OUT` or the documented `.../p9/out/` path.
+
+---
+
+## 13. Repository changes
+
+| File | Purpose |
+|---|---|
+| `backend/tests/perf/p9-hypotheses.md` | Pre-measurement hypotheses and decision rules |
+| `backend/tests/perf/p9-seed.mjs` | Deterministic synthetic dataset generator |
+| `backend/tests/perf/p9-explain.mjs` | Baseline and transient-index EXPLAIN harness |
+| `backend/tests/perf/p9-concurrency.test.mjs` | Seven concurrency/invariant scenarios |
+| `backend/tests/perf/p9-load.mjs` | Endpoint latency, mixed load, rate-limit probes |
+| `backend/tests/perf/p9-pdf.mjs` | PDF/Chromium concurrency, RSS, process, and abort probe |
+| `scripts/p9-container-drill.mjs` | Disposable OOM drill and p7 container-check observation |
+| `docs/PRODUCTION_READINESS_PHASE9.md` | This report |
+
+No other path was changed.
+
+Commit record:
+
+- `8f49f98` — `test(perf): add Phase 9 synthetic performance harnesses` (tests/scripts first).
+- Report commit is created as the second local commit; no push, PR, or `main` commit was performed.

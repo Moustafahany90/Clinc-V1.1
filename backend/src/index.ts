@@ -5,6 +5,8 @@ import { getClinicSettings } from './lib/clinic.js';
 import { clinicTimezoneName } from './lib/time.js';
 import { log } from './lib/logger.js';
 import { ensureStorage } from './modules/files/routes.js';
+import { closeHtmlPdfBrowser } from './lib/htmlPdf.js';
+import { createShutdownController } from './lib/gracefulShutdown.js';
 
 async function main(): Promise<void> {
   await ensureStorage();
@@ -23,15 +25,18 @@ async function main(): Promise<void> {
     });
   });
 
-  const shutdown = async (signal: string) => {
-    log('info', 'api.shutting_down', { message: 'shutting down', signal });
-    server.close(() => undefined);
-    await prisma.$disconnect().catch(() => undefined);
-    setTimeout(() => process.exit(0), 5_000).unref();
-  };
+  const shutdownController = createShutdownController({
+    closeServer: () => server.close(() => undefined),
+    closeBrowser: () => closeHtmlPdfBrowser(),
+    disconnectDatabase: () => prisma.$disconnect(),
+    log,
+    schedule: (callback, delayMs) => setTimeout(callback, delayMs),
+    cancel: (timer) => clearTimeout(timer as unknown as NodeJS.Timeout),
+    forceExit: (code) => process.exit(code),
+  });
 
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdownController.shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdownController.shutdown('SIGINT'));
 }
 
 main().catch((err) => {
