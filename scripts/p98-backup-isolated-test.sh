@@ -248,6 +248,15 @@ check $? 0 'wal-prune refuses a tampered retained base artifact'
 [ -f "${ARCHIVE_BADBASE}/${SEG00}" ]
 check $? 0 'wal-prune deletes nothing for a tampered base'
 
+# The scheduled verify job must detect the same tampering before any pruning.
+env BACKUP_VERIFY_SKIP_MOUNT_CHECK=1 \
+  bash "${SCRIPTS}/verify-pitr-base.sh" --root "$ROOT_BADBASE" \
+  >"${TMP}/badbase-verify.out" 2>&1
+[ "$?" -ne 0 ]
+check $? 0 'scheduled PITR verifier fails on a tampered base artifact'
+grep -q 'SHA-256 mismatch' "${TMP}/badbase-verify.out"
+check $? 0 'scheduled PITR verifier names the base hash mismatch'
+
 run_scheduler "$ROOT" "$ARCHIVE" wal-prune --apply >"${TMP}/noconfirm.out" 2>&1
 [ "$?" -ne 0 ]
 check $? 0 'wal-prune --apply refuses without --confirm DELETE'
