@@ -2,15 +2,17 @@
 -- 20261120222405_db_integrity_constraints. Existing constraints and data are
 -- untouched.
 --
--- Bookkeeping (verified on a disposable DB):
---   * If the migration FAILED during deploy, Prisma already leaves it in a
---     failed state; use:
+-- Bookkeeping (Prisma-native ONLY; never edit the migration ledger):
+--   * If the migration FAILED during deploy, Prisma leaves it in a failed
+--     state. After confirming the DDL is absent, use:
 --       npx prisma migrate resolve --rolled-back 20261120222405_db_integrity_constraints
---   * If the migration SUCCEEDED and you are undoing it deliberately,
---     --rolled-back is rejected (P3012). Remove only this migration's row:
---       DELETE FROM "_prisma_migrations"
---       WHERE migration_name = '20261120222405_db_integrity_constraints';
---     Then `npx prisma migrate deploy` re-applies the migration cleanly.
+--   * If the migration SUCCEEDED, --rolled-back is rejected (P3012) and this
+--     file only drops constraints: it does not change migration history. Do
+--     not modify the ledger to force a re-apply. To reverse the effect safely,
+--     author and deploy a NEW forward migration that re-creates the constraints,
+--     or restore from a verified backup under the approved rollback procedure.
+--   * Record the chosen reconciliation, operator and evidence in the change
+--     log. See docs/PRODUCTION_ROLLBACK_RUNBOOK.md.
 
 ALTER TABLE "Charge" DROP CONSTRAINT IF EXISTS "Charge_status_allowed";
 ALTER TABLE "Charge" DROP CONSTRAINT IF EXISTS "Charge_void_fields_consistent";

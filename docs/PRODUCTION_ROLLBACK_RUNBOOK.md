@@ -13,7 +13,7 @@
 
 1. **Never restore an older database over a newer database as a routine rollback.** A full restore overwrites transactions created after the backup. Default to an application rollback, a forward fix, or an isolated PITR/data-export reconciliation.
 2. **Application rollback and database rollback are different decisions.** Application rollback redeploys a previous reviewed artifact/configuration. It does not undo committed schema or data changes.
-3. **Never edit `_prisma_migrations` directly.** Use `prisma migrate resolve --rolled-back` or `--applied` only after verifying actual database state, or author a new forward migration. The `DELETE FROM "_prisma_migrations"` text in the historical migration rollback file is unsafe and must not be followed.
+3. **Never edit `_prisma_migrations` directly.** Use `prisma migrate resolve --rolled-back` or `--applied` only after verifying actual database state, or author a new forward migration. The migration 8 `rollback.sql` helper was corrected in Phase 9.8: it drops constraints only and deliberately does not alter migration history; any ledger manipulation is unsafe and must not be improvised.
 4. **Never bypass fail-closed checks.** Do not set `WAL_ARCHIVE_SKIP_MOUNT_CHECK=1`, `BACKUP_*_SKIP_MOUNT_CHECK=1`, or equivalent test overrides on a Production host.
 5. **Never delete backups, WAL segments, logs, or evidence during an incident** unless a separate, recorded owner decision authorizes it.
 6. **Never place patient data, private keys, tokens, cookies, phone numbers, QR payloads, or raw request bodies in tickets or chat.**

@@ -109,7 +109,7 @@ permits.
   to its `main` content after Prisma rewrote line endings.
 - Both SQL files were checked for encoding: no NUL bytes, no UTF-8 BOM.
 
-**Rollback bookkeeping (verified on a disposable DB):**
+**HISTORICAL / UNSAFE — SUPERSEDED by Phase 9.8. Rollback bookkeeping (verified on a disposable DB):**
 
 - If deploy **failed**, Prisma leaves the migration in a failed state and
   `npx prisma migrate resolve --rolled-back 20261120222405_db_integrity_constraints`
