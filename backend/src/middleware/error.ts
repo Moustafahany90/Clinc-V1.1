@@ -12,6 +12,78 @@ export const notFoundHandler: RequestHandler = (req, res) => {
   });
 };
 
+const APPOINTMENT_OVERLAP_SQLSTATE = '23P01';
+const APPOINTMENT_OVERLAP_CONSTRAINT = 'appointment_no_doctor_overlap';
+
+const APPOINTMENT_OVERLAP_RESPONSE = {
+  error: {
+    code: 'APPOINTMENT_CONFLICT',
+    message: 'This doctor already has an appointment overlapping that time.',
+  },
+} as const;
+
+/** Prisma sometimes embeds the driver error in `message` without a `cause`. */
+const ERROR_CHAIN_KEYS = ['cause', 'originalError', 'wrappedError', 'meta'] as const;
+
+// Both pieces are required: a bare SQLSTATE or a bare constraint name is not
+// enough to reclassify an otherwise unclassified error.
+const SQLSTATE_FIELD_PATTERN =
+  /(?<![A-Za-z0-9_])(?:\\?["'])?code(?:\\?["'])?\s*[:=]\s*(?:\\?["'])?23P01(?:\\?["'])?/;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const CONSTRAINT_FIELD_PATTERN = new RegExp(
+  `(?<![A-Za-z0-9_])constraint(?:Name|_name)?\\s*(?:[:=]\\s*)?(?:\\\\?["'])?` +
+    `(?<![A-Za-z0-9_])${escapeRegExp(APPOINTMENT_OVERLAP_CONSTRAINT)}` +
+    `(?![A-Za-z0-9_])(?:\\\\?["'])?`,
+  'i',
+);
+
+type UnknownRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): UnknownRecord | null {
+  return value !== null && typeof value === 'object' ? (value as UnknownRecord) : null;
+}
+
+/** Walk nested/wrapped errors once, ignoring cycles. */
+function errorChain(err: unknown): unknown[] {
+  const seen = new Set<unknown>();
+  const result: unknown[] = [];
+  const queue: unknown[] = [err];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
+    seen.add(current);
+    result.push(current);
+    const record = asRecord(current);
+    if (!record) continue;
+    for (const key of ERROR_CHAIN_KEYS) {
+      const nested = record[key];
+      if (nested && typeof nested === 'object') queue.push(nested);
+    }
+  }
+  return result;
+}
+
+/** Structured PostgreSQL SQLSTATE anywhere in the error chain. */
+function hasStructuredOverlap(err: unknown): boolean {
+  return errorChain(err).some((node) => asRecord(node)?.code === APPOINTMENT_OVERLAP_SQLSTATE);
+}
+
+/** Message-only fallback used when Prisma embeds the driver error as text. */
+function hasMessageOverlap(err: unknown): boolean {
+  return errorChain(err).some((node) => {
+    const message = asRecord(node)?.message;
+    return (
+      typeof message === 'string' &&
+      SQLSTATE_FIELD_PATTERN.test(message) &&
+      CONSTRAINT_FIELD_PATTERN.test(message)
+    );
+  });
+}
+
 export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   if (res.headersSent) return;
 
@@ -68,14 +140,15 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   }
 
   // Postgres exclusion constraint = overlapping appointment for a doctor.
+  // Handle the plain driver error, a structured nested cause, and Prisma's
+  // text-wrapped connector error through the same classification path.
   const dbCode = (err as { code?: string }).code;
-  if (dbCode === '23P01') {
-    res.status(409).json({
-      error: {
-        code: 'APPOINTMENT_CONFLICT',
-        message: 'This doctor already has an appointment overlapping that time.',
-      },
-    });
+  if (
+    dbCode === APPOINTMENT_OVERLAP_SQLSTATE ||
+    hasStructuredOverlap(err) ||
+    hasMessageOverlap(err)
+  ) {
+    res.status(409).json(APPOINTMENT_OVERLAP_RESPONSE);
     return;
   }
 
