@@ -2,7 +2,7 @@
 # This runs from a separate scheduler so a stopped monitor is still detected.
 [Unit]
 Description=Clinic Phase 7 monitor heartbeat (dead-man's switch) check
-Documentation=file:/opt/clinic/Clinc-V1.1/docs/monitoring-runbook.md
+Documentation=file:/opt/clinic/docs/monitoring-runbook.md
 
 [Service]
 Type=oneshot
@@ -10,7 +10,7 @@ Type=oneshot
 # admin account. This check does not read the root-only backup disk.
 User=clinc_server
 Group=clinc_server
-WorkingDirectory=/opt/clinic/Clinc-V1.1
+WorkingDirectory=/opt/clinic
 EnvironmentFile=-/etc/clinic/monitor.env
 ExecStart=/usr/bin/bash scripts/p7-check-heartbeat.sh
 NoNewPrivileges=true

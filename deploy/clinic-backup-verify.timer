@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily verification of the newest logical backup set
+Description=Daily verification of newest logical and PITR base backup sets
 Documentation=file:/opt/clinic/docs/backup-restore.md
 
 [Timer]

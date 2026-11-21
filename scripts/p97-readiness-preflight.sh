@@ -23,7 +23,68 @@ require_file() {
   fi
 }
 
-printf 'Phase 9.7 read-only repository preflight\n'
+# Needles are assembled at runtime so this script does not itself contain the
+# forbidden strings as a copy-pasteable literal.
+UNSAFE_LEDGER_NEEDLE="DELETE FROM \"_prisma_mig""rations\""
+LEGACY_ROOT_NEEDLE="/opt/clinic/Clinc-V1"".1"
+
+check_unsafe_ledger_guidance() {
+  local hits hit file rest line context allowed
+  hits="$(grep -R -n -F -e "$UNSAFE_LEDGER_NEEDLE" \
+    --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.next \
+    "$ROOT" 2>/dev/null || true)"
+  if [ -z "$hits" ]; then
+    pass 'no copy-pasteable direct migration-ledger deletion remains in tracked files'
+    return 0
+  fi
+  while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
+    file="${hit%%:*}"
+    rest="${hit#*:}"
+    line="${rest%%:*}"
+    rel_file="${file#${ROOT}/}"
+    allowed=0
+    # Historical reports may quote the unsafe command only inside a section
+    # explicitly marked UNSAFE / SUPERSEDED. Live runbooks and rollback files
+    # are never exempt.
+    case "$rel_file" in
+      docs/PRODUCTION_READINESS_PHASE_M.md|docs/PRODUCTION_READINESS_PHASE9_7.md)
+        context="$(sed -n "$((line > 12 ? line - 12 : 1)),${line}p" "$file" 2>/dev/null)"
+        if printf '%s\n' "$context" | grep -qiE 'UNSAFE|SUPERSEDED|Never edit'; then
+          allowed=1
+        fi
+        ;;
+    esac
+    if [ "$allowed" -eq 1 ]; then
+      info "historical unsafe quote is explicitly marked (line ${line}): $rel_file"
+    else
+      fail "unsafe migration-ledger guidance at ${rel_file}:${line}"
+    fi
+  done <<<"$hits"
+}
+
+check_single_application_root() {
+  local f found=0 hits
+  # Historical Phase 8/9 readiness reports are deliberately not rewritten;
+  # this invariant covers live units, scripts, compose files and runbooks.
+  info 'legacy nested application-root path is checked in active config/docs only'
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    hits="$(grep -n -F "$LEGACY_ROOT_NEEDLE" "$ROOT/$f" 2>/dev/null || true)"
+    [ -n "$hits" ] || continue
+    found=1
+    fail "legacy application root still referenced in $f"
+  done < <(cd "$ROOT" && git ls-files -- \
+    'deploy/*' 'scripts/*' 'docker-compose*.yml' \
+    'docs/PRODUCTION_DEPLOYMENT_RUNBOOK.md' \
+    'docs/PRODUCTION_ROLLBACK_RUNBOOK.md' \
+    'docs/PRODUCTION_BLOCKER_REGISTER.md' \
+    'docs/backup-restore.md' 'docs/monitoring-runbook.md' \
+    'docs/PRODUCTION_READINESS_PHASE9_8.md')
+  [ "$found" -eq 0 ] && pass 'all active units/scripts/docs use the single /opt/clinic application root'
+}
+
+printf 'Phase 9.7/9.8 read-only repository preflight\n'
 printf 'Repository: %s\n' "$ROOT"
 if [ -d "$ROOT/.git" ]; then
   pass 'repository .git directory present'
@@ -68,10 +129,13 @@ for f in \
   deploy/clinic-backup-full.timer deploy/clinic-backup-pitr-base.timer \
   deploy/clinic-backup-verify.timer deploy/clinic-backup-retention.timer \
   deploy/clinic-wal-prune.timer \
+  deploy/clinic-backup-alert@.service \
   scripts/backup.sh scripts/backup-common.sh scripts/backup-verify.sh \
   scripts/backup-retention.sh scripts/backup-scheduler.sh \
-  scripts/pitr-base-backup.sh scripts/pitr-restore.sh \
+  scripts/verify-pitr-base.sh scripts/pitr-base-backup.sh scripts/pitr-restore.sh \
   scripts/p7-check-pitr.sh scripts/p7-check-wal.sh scripts/p7-monitor.sh \
+  scripts/p98-backup-isolated-test.sh \
+  deploy/backup.env.example \
   docs/backup-restore.md docs/monitoring-runbook.md \
   docs/PRODUCTION_READINESS_PHASE9_6.md; do
   require_file "$f"
@@ -118,6 +182,23 @@ if grep -qF 'ExecStart=/bin/bash /opt/clinic/scripts/backup-scheduler.sh %i' \
 else
   fail 'dispatcher service ExecStart regressed or is missing'
 fi
+if grep -qF 'OnFailure=clinic-backup-alert@%i.service' \
+    "$ROOT/deploy/clinic-backup-schedule@.service" 2>/dev/null; then
+  pass 'dispatcher service has a visible OnFailure notification target'
+else
+  fail 'dispatcher service has no OnFailure notification target'
+fi
+if grep -q '^\[Install\]' "$ROOT/deploy/clinic-backup-schedule@.service" 2>/dev/null; then
+  pass 'dispatcher service declares an [Install] section'
+else
+  fail 'dispatcher service has no [Install] section'
+fi
+if grep -R -q -E '^[[:space:]]*SCHED_SKIP_MOUNT_CHECK=1([[:space:]]|$)' \
+    "$ROOT/deploy" "$ROOT"/docker-compose*.yml 2>/dev/null; then
+  fail 'SCHED_SKIP_MOUNT_CHECK=1 must never appear in shipped configuration'
+else
+  pass 'shipped configuration never enables the test-only mount-check bypass'
+fi
 for s in scripts/backup-scheduler.sh scripts/backup-retention.sh; do
   if grep -qE -- '--apply|--confirm DELETE' "$ROOT/$s" 2>/dev/null; then
     pass "$s contains explicit mutation gates (review required before use)"
@@ -140,6 +221,10 @@ if [ "$installed" -eq 0 ]; then
 else
   fail "found $installed installed Clinic timer unit(s); this preflight must not assume a clean host"
 fi
+
+# --- Phase 9.8 documentation/path invariants --------------------------------
+check_unsafe_ledger_guidance
+check_single_application_root
 
 if [ "$FAILURES" -eq 0 ]; then
   printf 'RESULT  PASS (repository invariants only; NOT Production readiness)\n'

@@ -141,7 +141,7 @@
 
 - **Severity:** High
 - **Component:** `backend/prisma/migrations/20261120222405_db_integrity_constraints/rollback.sql:5-13`; historical `PHASE9_3.md:40`
-- **Description:** The rollback file proposes a direct `DELETE FROM "_prisma_migrations"` for a successful migration. Direct ledger edits are unsafe and must never be used.
+- **Description:** The rollback file proposed a direct SQL deletion of a row in the Prisma migration ledger for a successful migration. Direct ledger edits are unsafe and must never be used.
 - **Current evidence:** File content verified in this phase; `PRODUCTION_READINESS_PHASE9_7.md` and the rollback runbook explicitly prohibit it and specify `prisma migrate resolve --rolled-back` / `--applied` and new forward migrations instead.
 - **Missing evidence:** Owner-approved correction of the historical file or an explicit standing instruction that supersedes it.
 - **Exact action required:** Treat the new runbook as authoritative; obtain approval to amend the rollback file text without changing applied migrations or history.
@@ -381,10 +381,10 @@
 
 - **Severity:** Medium
 - **Component:** `deploy/clinic-backup-schedule@.service`, `deploy/clinic-monitor.service`, `scripts/backup-scheduler.sh:64-72`
-- **Description:** Backup units assume repository root `/opt/clinic` while monitor units assume `/opt/clinic/Clinc-V1.1`. The dispatcher has no `[Install]` section, no `OnFailure=`, and treats `flock -n` contention as a successful skip; with `Persistent=true` and 10-minute jitter, a slow job can silently suppress another job's run.
-- **Current evidence:** Verified in unit files and dispatcher source; no hardening settings on the dispatcher unit.
-- **Missing evidence:** Single approved repository path, failure notification path, and overlap policy.
-- **Exact action required:** Reconcile paths, define failure notification, and make overlap skips visible rather than silent successes.
+- **Description:** Backup and monitor units used conflicting repository roots, and the dispatcher had no `[Install]` section, no `OnFailure=`, and treated `flock -n` contention as a successful skip; with `Persistent=true` and 10-minute jitter, a slow job could silently suppress another job's run.
+- **Current evidence:** Phase 9.8 reconciled every active unit to the single approved root `/opt/clinic`, added an `[Install]` section and `OnFailure=` notification target, and made repeated lock contention emit a structured alert and fail closed. Isolated proof: `scripts/p98-backup-isolated-test.sh`.
+- **Missing evidence:** Owner approval of `/opt/clinic` as the target-host checkout root; target-host installation and a scheduled overlap/failure drill.
+- **Exact action required:** Confirm the single root on the target host, install the reconciled units under explicit authorization, and verify that a forced overlap produces a visible alert.
 - **Production authorization required:** No for the plan; yes for target-host installation.
 - **Acceptance criteria:** All units reference one approved path; an overlap skip produces a visible alert or documented acceptable outcome.
 - **Final status:** **OPEN**

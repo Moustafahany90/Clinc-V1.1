@@ -4,6 +4,9 @@ Documentation=file:/opt/clinic/docs/backup-restore.md
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=/opt/clinic/scripts/backup-scheduler.sh
+# The dispatcher already emits a structured alert on a failed or repeatedly
+# skipped run. This unit catches failures before the script starts as well.
+OnFailure=clinic-backup-alert@%i.service
 
 [Service]
 Type=oneshot
@@ -17,3 +20,12 @@ TimeoutStartSec=2h
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+# The backup root and the monitor state directory must remain writable.
+ReadWritePaths=/mnt/clinic-backups /var/lib/clinic-monitor /run/lock
+
+[Install]
+WantedBy=multi-user.target

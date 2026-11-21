@@ -78,6 +78,32 @@ else
   line="$(p7_emit pitr.base "$status" "$severity" "$message" "$extra")"
   printf '%s\n' "$line"; note_worst "$status"
 
+  # --- newest PITR base artifact hash/size (PB-30) ---------------------------
+  base_archive="$(manifest_value base_archive "$newest_manifest")"
+  base_sha="$(manifest_value base_sha256 "$newest_manifest" | tr 'A-F' 'a-f')"
+  base_bytes="$(manifest_value base_bytes "$newest_manifest")"
+  base_dir="$(dirname "$newest_manifest")"
+  artifact_ok=1
+  case "$base_archive" in ''|*/*|*..*) artifact_ok=0 ;; esac
+  case "$base_sha" in *[!0-9a-f]*|'') artifact_ok=0 ;; esac
+  [ "${#base_sha}" -eq 64 ] || artifact_ok=0
+  case "$base_bytes" in ''|*[!0-9]*) artifact_ok=0 ;; esac
+  if [ "$artifact_ok" -eq 1 ] && [ -f "${base_dir}/${base_archive}" ]; then
+    actual_sha="$(sha256sum "${base_dir}/${base_archive}" 2>/dev/null | awk '{print $1}' | tr 'A-F' 'a-f')"
+    actual_bytes="$(wc -c < "${base_dir}/${base_archive}" 2>/dev/null | tr -d ' ')"
+    [ "$actual_sha" = "$base_sha" ] || artifact_ok=0
+    [ "$actual_bytes" = "$base_bytes" ] || artifact_ok=0
+  else
+    artifact_ok=0
+  fi
+  if [ "$artifact_ok" -eq 0 ]; then
+    line="$(p7_emit pitr.base.artifact critical page 'newest PITR base artifact hash/size is invalid or missing' "\"manifest\":\"$(p7_json_escape "${newest_manifest#${BACKUP_ROOT}/}")\",\"runbook\":\"docs/backup-restore.md#pitr\"")"
+    printf '%s\n' "$line"; note_worst critical
+  else
+    line="$(p7_emit pitr.base.artifact ok info 'newest PITR base artifact SHA-256 and size verified' "\"manifest\":\"$(p7_json_escape "${newest_manifest#${BACKUP_ROOT}/}")\",\"runbook\":\"docs/backup-restore.md#pitr\"")"
+    printf '%s\n' "$line"
+  fi
+
   # --- required WAL range completeness and sidecar validity ------------------
   start_file="$(manifest_value required_wal_start "$newest_manifest")"
   end_file="$(manifest_value required_wal_end "$newest_manifest")"
@@ -99,7 +125,9 @@ else
       else
         actual="$(sha256sum "$f" 2>/dev/null | awk '{print $1}')"
         expected="$(awk '{print $1}' "${f}.sha256" 2>/dev/null | tr 'A-F' 'a-f')"
-        [ -n "$actual" ] && [ "$actual" = "$expected" ] || invalid=$((invalid + 1))
+        manifest_expected="$(manifest_value "wal.sha256.${seg}" "$newest_manifest" | tr 'A-F' 'a-f')"
+        [ -n "$actual" ] && [ "$actual" = "$expected" ] && [ "$expected" = "$manifest_expected" ] || \
+          invalid=$((invalid + 1))
       fi
       [ "$seg" = "$end_file" ] && break
       # Stop defensively: a corrupt/manipulated manifest must not loop forever.
