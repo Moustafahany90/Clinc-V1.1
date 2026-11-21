@@ -277,6 +277,14 @@ queueRouter.post(
     });
 
     const result = await prisma.$transaction(async (tx) => {
+      // The appointment exclusion constraint uses a GiST index. Concurrent
+      // inserts for the same doctor can deadlock (SQLSTATE 40P01) while their
+      // share locks intersect, which surfaces as HTTP 500. Serialising the
+      // per-doctor insert window with a transaction-scoped advisory lock keeps
+      // the race deterministic: one insert wins, the rest fail with 23P01 and
+      // are mapped to 409 APPOINTMENT_CONFLICT by the error handler.
+      await tx.$queryRaw`SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(hashtext(${doctor.id}::text))) AS advisor`;
+
       const appointment = await tx.appointment.create({
         data: {
           patientId: patient.id,
