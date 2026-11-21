@@ -21,7 +21,10 @@
 
 https://{$CLINIC_DOMAIN} {
 	encode zstd gzip
-	tls {$TAILSCALE_CERT_DIR}/{$CLINIC_DOMAIN}.crt {$TAILSCALE_CERT_DIR}/{$CLINIC_DOMAIN}.key
+	# TAILSCALE_CERT_DIR is the host path used by the Compose bind mount.
+	# Inside this container that directory is always mounted at
+	# /etc/tailscale/certs, so use the fixed container path here.
+	tls /etc/tailscale/certs/{$CLINIC_DOMAIN}.crt /etc/tailscale/certs/{$CLINIC_DOMAIN}.key
 
 	# Logging-only redaction. Strip everything from the first '?' in the logged
 	# request URI and delete credential headers. No routing, header, TLS or

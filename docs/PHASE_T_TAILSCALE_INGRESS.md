@@ -32,6 +32,7 @@ The Tailscale overlay keeps the base stack's safe binds:
 | `docker-compose.tailscale.yml` | Caddy overlay that publishes only `${TAILSCALE_IP}:443`, mounts the Tailscale Caddyfile read-only, mounts issued certificate files read-only, and keeps the existing Caddy resource limits. |
 | `deploy/Caddyfile.tailscale` | Disables `auto_https`, serves only `https://{$CLINIC_DOMAIN}`, uses `{$TAILSCALE_CERT_DIR}/{$CLINIC_DOMAIN}.crt` and `.key`, preserves HSTS and log redaction, and proxies to `web:80`. |
 | `scripts/deploy-github-main.sh` | Fails-closed helper that deploys only the current GitHub `main` tip pinned by exact SHA. Dry-run by default; real deployment requires `--apply --confirm DEPLOY`. |
+| `scripts/repair-tailscale-caddy.sh` | Narrow, GitHub-pinned in-place repair helper for the Caddy ingress. Restarts only Caddy and never touches DB, migrations, volumes, or other services. Dry-run by default; real repair requires `--apply --confirm REPAIR`. |
 | `.env.example` | Adds non-secret `CLINIC_DOMAIN`, `TAILSCALE_IP`, and `TAILSCALE_CERT_DIR` placeholders. |
 
 No production `.env`, private key, token, password, certificate, or patient record is added to the repository.
@@ -108,6 +109,29 @@ bash scripts/deploy-github-main.sh \
 ```
 
 Do not run this command until Stage 2 is explicitly approved, the exact commit is CI-green, the protected env file exists, Tailscale certificate files are in place, and the change record names a rollback decision owner.
+
+### 5.3 Caddy-only repair after an initial install
+
+The initial release used the host certificate directory variable directly inside the Caddyfile. Because Compose bind-mounts that host directory at `/etc/tailscale/certs`, Caddy looked for the certificate at a non-existent path inside the container and restarted. The pinned fix uses the fixed mounted path and adds a repair helper for existing installs.
+
+The repair helper is also GitHub-only and commit-pinned. It requires both the currently deployed SHA and a newer CI-green GitHub `main` SHA, validates ingress files and port shape from a temporary GitHub clone, then restarts only `caddy`:
+
+```bash
+# Dry run first — no production change
+bash /usr/local/bin/clinic-repair-tailscale-caddy.sh \
+  --commit <NEW_CI_GREEN_MAIN_SHA> \
+  --expected-current <CURRENTLY_DEPLOYED_SHA> \
+  --env-file /etc/clinic/clinic.env
+
+# Gated repair — Caddy only
+bash /usr/local/bin/clinic-repair-tailscale-caddy.sh \
+  --commit <NEW_CI_GREEN_MAIN_SHA> \
+  --expected-current <CURRENTLY_DEPLOYED_SHA> \
+  --env-file /etc/clinic/clinic.env \
+  --apply --confirm REPAIR
+```
+
+The original `deploy-github-main.sh` remains intentionally first-install-only: it refuses when Clinic containers or project volumes already exist. Use the repair helper for an existing install rather than rerunning the initial apply.
 
 ---
 
