@@ -90,7 +90,7 @@ Local commits on `fix/phase9-8-operational-defects`:
 - `62be9b6` — PB-25/27/28/30/31 backup scheduling.
 - `3ace484` — PB-26/29 monitoring.
 - `f84d358` — PB-30 direct tampered-base verifier proof.
-- final documentation commit — blocker register statuses/counts, live runbooks, and this report (this commit). No commit hash is asserted here to avoid a self-referential claim; use `git log` on the branch to confirm the exact SHA.
+- final documentation commits — blocker register statuses/counts, live runbooks, and this report (`d05a050` plus a final cleanup-accuracy follow-up). Other commit SHAs are listed above; use `git log` on the branch to confirm the exact final SHA.
 
 Final footprint: 28 files changed, 1835 insertions(+), 237 deletions(-) (verified with `git diff --shortstat main..HEAD` after this commit)
 
@@ -101,7 +101,7 @@ Changed paths are limited to the Phase 9.8 allowlist: the listed rollback SQL fi
 ## 8. p98 disposable resource list
 
 - Temporary directories: `p98-backup-tests.*`, `p98-monitor-tests.*`, and p98-cap/crash state directories created under the approved temp root; removed by EXIT traps.
-- Synthetic Docker containers: `p98-monitor-perms` (removed by the monitor harness) and `p98-ci-postgres` (created with `--rm` for the backend suite; removal confirmed after the suite completes).
+- Synthetic Docker containers: `p98-monitor-perms` (removed by the monitor harness) and `p98-ci-postgres` (created with `--rm` for the backend suite; stopped and removed, with no `p98*` containers remaining).
 - Cached images only: `ubuntu:24.04` and `postgres:16.4-alpine`, both started with `--pull=never`.
 - No `ultrasound-clinic-*` container or volume was touched.
 
