@@ -563,6 +563,7 @@ model Measurement {
 
   @@index([visitId])
   @@index([doctorId])
+  @@index([visitId, measuredAt])
 }
 
 model FileAsset {
@@ -589,6 +590,7 @@ model FileAsset {
   @@index([visitId])
   @@index([reportId])
   @@index([doctorId])
+  @@index([patientId, createdAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -676,6 +678,8 @@ model Refund {
   createdAt    DateTime @default(now())
 
   @@index([patientId, refundedAt])
+  @@index([refundedAt])
+  @@index([paymentId])
 }
 
 model Expense {
