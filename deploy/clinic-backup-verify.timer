@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily verification of the newest logical backup set
+Documentation=file:/opt/clinic/docs/backup-restore.md
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 Africa/Cairo
+Persistent=true
+RandomizedDelaySec=10m
+Unit=clinic-backup-schedule@verify.service
+
+[Install]
+WantedBy=timers.target

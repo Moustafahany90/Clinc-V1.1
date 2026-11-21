@@ -1,4 +1,4 @@
-# Phase 9.1 optional resource-limit overlay.
+# Phase 9.1 optional resource-limit overlay, right-sized in Phase 9.6.
 #
 # The base compose file intentionally has no resource ceilings. Apply this
 # overlay on the stated production host (Xeon E3-1225 v5, 16 GB RAM):
@@ -8,28 +8,45 @@
 #   docker compose -f docker-compose.yml -f docker-compose.tls.yml \
 #     -f docker-compose.limits.yml up -d
 #
-# Sizing target: <= 9.5 GB hard memory across all services, leaving >= 6 GB
-# for the host OS, page cache and Chromium's child processes outside the Node
-# heap. CPU values are burst quotas, not reservations. Validate before use:
-#   docker compose -f docker-compose.yml -f docker-compose.limits.yml config
+# Phase 9.6 sizing target for the stated 4-core / 16 GB host:
+#   steady CPU quota: db 1.5 + backend 1.0 + web 0.25 + evolution 0.5
+#                     + caddy 0.5 = 3.75 vCPU (<= 4.0 cores)
+#   migration burst:  + migrate 0.75 = 4.50 vCPU for the short one-shot window
+#   hard memory:      db 4g + backend 3g + web 256m + evolution 1g
+#                     + caddy 256m = ~8.5 GB, leaving >= 7 GB for the host,
+#                     page cache and Chromium child processes outside the heap.
+#
+# CPU values are burst quotas, not reservations. cpu_shares give deterministic
+# priority if the host is contended. These are conservative configuration
+# defaults derived from the stated host capacity; they are NOT measurements.
+# Validate on the target host before applying:
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml \
+#     -f docker-compose.limits.yml config
 
 services:
   db:
     mem_limit: 4g
     mem_reservation: 2g
-    cpus: 2.0
+    cpus: 1.5
+    cpu_shares: 1024
     pids_limit: 200
 
   migrate:
+    # The one-shot Prisma deploy is the startup gate; keep a bounded heap below
+    # the cgroup cap so a large migration fails cleanly instead of being OOM-killed.
     mem_limit: 1g
     mem_reservation: 256m
-    cpus: 1.0
+    cpus: 0.75
+    cpu_shares: 512
     pids_limit: 100
+    environment:
+      NODE_OPTIONS: --max-old-space-size=768
 
   backend:
     mem_limit: 3g
     mem_reservation: 1g
-    cpus: 1.5
+    cpus: 1.0
+    cpu_shares: 2048
     pids_limit: 300
     environment:
       # Leave headroom inside the 3 GB container for the Chromium PDF renderer,
@@ -40,14 +57,18 @@ services:
     mem_limit: 256m
     mem_reservation: 64m
     cpus: 0.25
+    cpu_shares: 128
     pids_limit: 100
 
   evolution:
     mem_limit: 1g
     mem_reservation: 512m
-    cpus: 1.0
+    cpus: 0.5
+    cpu_shares: 512
     pids_limit: 200
 
-# Caddy is intentionally absent: it is defined only in docker-compose.tls.yml.
-# Declaring it here would create an inert, config-less service whenever this
-# overlay is used without TLS. The optional TLS front door remains unthrottled.
+  # Phase 9.6: caddy resource caps live in docker-compose.tls.yml itself.
+  # They are not declared here because `caddy` does not exist in the base
+  # stack, and Compose rejects limits on an undefined service when this
+  # overlay is used without TLS. The CPU/memory arithmetic below still
+  # includes caddy when the TLS overlay is applied.

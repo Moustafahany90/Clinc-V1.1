@@ -28,12 +28,54 @@ BACKUP_REQUIRED_DIRS="daily weekly monthly wal-archive manifests quarantine logs
 # Set by backup_check_storage() so callers can report a precise reason.
 BACKUP_CHECK_REASON=""
 
+# Stable exit codes. Callers may pass a numeric first argument to backup_die;
+# messages that do not start with a number keep the historical exit code 1.
+BACKUP_EXIT_OK=0
+BACKUP_EXIT_USAGE=2
+BACKUP_EXIT_PRECHECK=3
+BACKUP_EXIT_IO=4
+BACKUP_EXIT_BACKUP=5
+BACKUP_EXIT_VERIFY=6
+BACKUP_EXIT_RESTORE=7
+BACKUP_EXIT_ENCRYPTION=8
+
 # Fatal error helper used by every caller of this library. Defined here so the
 # producer, verifier and storage validator all fail closed with a precise,
 # human-readable reason instead of an undefined-command error.
 backup_die() {
+  local code=1
+  case "${1:-}" in
+    ''|*[!0-9]*) : ;;
+    *) code="$1"; shift ;;
+  esac
   echo "BACKUP ERROR: $*" >&2
-  exit 1
+  exit "$code"
+}
+
+# Generate a collision-resistant backup identifier without exposing secrets.
+backup_new_id() {
+  if [ -r /proc/sys/kernel/random/uuid ]; then
+    cat /proc/sys/kernel/random/uuid
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 16
+  else
+    printf '%s-%s-%s' "$(date -u +%Y%m%dT%H%M%SZ)" "$$" "${RANDOM:-0}"
+  fi
+}
+
+# Load a MANIFEST.txt into an associative array named by the second argument.
+# Usage: declare -A M=(); backup_manifest_load path M
+backup_manifest_load() {
+  local file="$1" name="$2" key value
+  [ -f "$file" ] || return 1
+  local -n target="$name"
+  target=()
+  while IFS='=' read -r key value; do
+    [ -n "$key" ] || continue
+    value="${value%$'\r'}"
+    target["$key"]="$value"
+  done < "$file"
+  return 0
 }
 
 backup_canonical() {
@@ -149,4 +191,79 @@ backup_require_storage() {
   if ! backup_check_storage "$@"; then
     backup_die "$BACKUP_CHECK_REASON"
   fi
+}
+
+# --- WAL segment helpers (Phase 9.5) ---------------------------------------
+# These are pure path/name helpers. They never read a database or write files.
+
+backup_wal_is_segment() {
+  case "${1:-}" in
+    ????????????????????????)
+      case "${1}" in
+        *[!0-9A-Fa-f]*) return 1 ;;
+        *) return 0 ;;
+      esac
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# Increment the low 64 bits of a 24-hex-digit WAL segment name. Refuse to wrap
+# rather than guessing a timeline change; a wrap would require human review.
+backup_wal_next() {
+  local name="${1:-}" timeline rest out="" carry=1 i ch n
+  backup_wal_is_segment "$name" || return 1
+  timeline="${name:0:8}"
+  rest="${name:8:16}"
+  for ((i = 15; i >= 0; i--)); do
+    ch="${rest:i:1}"
+    ch="${ch,,}"
+    n=$((16#$ch + carry))
+    if [ "$n" -ge 16 ]; then
+      out="0${out}"
+    else
+      out="$(printf '%x' "$n")${out}"
+      carry=0
+    fi
+  done
+  [ "$carry" -eq 0 ] || return 1
+  printf '%s%s\n' "$timeline" "$out"
+}
+
+# Print the inclusive list of segment filenames between two WAL files.
+backup_wal_range() {
+  local start="${1:-}" end="${2:-}" cur count=0
+  backup_wal_is_segment "$start" || return 1
+  backup_wal_is_segment "$end" || return 1
+  cur="$start"
+  while :; do
+    printf '%s\n' "$cur"
+    count=$((count + 1))
+    # Guard against a corrupted/manipulated range before it can spin forever.
+    [ "$count" -le 100000 ] || return 1
+    [ "$cur" = "$end" ] && break
+    cur="$(backup_wal_next "$cur")" || return 1
+  done
+}
+
+backup_sha256() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  else
+    shasum -a 256 "$file" | awk '{print $1}'
+  fi
+}
+
+backup_file_bytes() {
+  wc -c < "$1" | tr -d '[:space:]'
+}
+
+backup_is_sha256() {
+  case "${1:-}" in
+    ????????????????????????????????????????????????????????????????)
+      case "${1}" in *[!0-9a-fA-F]*) return 1 ;; *) return 0 ;; esac
+      ;;
+    *) return 1 ;;
+  esac
 }

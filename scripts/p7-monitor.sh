@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/p7-common.sh"
 
 STATE_DIR="$(p7_state_dir)"
-CHECKS="${P7_MONITOR_CHECKS:-backup capacity containers cert wal time heartbeat}"
+CHECKS="${P7_MONITOR_CHECKS:-backup pitr capacity containers cert wal time heartbeat}"
 WINDOW="${P7_DEDUP_WINDOW_SECONDS:-${P7_ALERT_REPEAT_SEC:-300}}"
 MAX_PER_WINDOW="${P7_MAX_ALERTS_PER_WINDOW:-10}"
 INTERVAL="${P7_INTERVAL_SEC:-300}"

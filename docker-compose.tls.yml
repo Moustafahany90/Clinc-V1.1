@@ -10,6 +10,14 @@ services:
   caddy:
     image: caddy:2.11-alpine
     restart: unless-stopped
+    # Phase 9.6: keep the public TLS front door inside the 4-core/16 GB host
+    # budget. Defined here, not in docker-compose.limits.yml, so the limits
+    # overlay remains valid when TLS is not applied.
+    mem_limit: 256m
+    mem_reservation: 64m
+    cpus: 0.5
+    cpu_shares: 256
+    pids_limit: 100
     depends_on:
       web:
         condition: service_healthy

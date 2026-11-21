@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly WAL-linked PITR base backup
+Documentation=file:/opt/clinic/docs/backup-restore.md
+
+[Timer]
+OnCalendar=Sun *-*-* 03:00:00 Africa/Cairo
+Persistent=true
+RandomizedDelaySec=10m
+Unit=clinic-backup-schedule@pitr-base.service
+
+[Install]
+WantedBy=timers.target

@@ -12,8 +12,8 @@ once, or invoke each script as `bash scripts/<name>.sh`.
 
 ## What a complete backup set contains
 
-Phase 8.3.1 verified the actual host layout and aligned all scripts to it. One
-set per run is a **directory** inside its tier, named
+Phase 8.3.1 verified the actual host layout; Phase 9.4 extended the set format
+to `backup_format=4`. One set per run is a **directory** inside its tier, named
 `clinic-<tier>-<STAMP>[-<label>]`, where `<tier>` is `daily`, `weekly` or
 `monthly` and `<STAMP>` is `YYYYMMDDTHHMMSSZ`:
 
@@ -22,35 +22,49 @@ set per run is a **directory** inside its tier, named
 ├── daily/clinic-daily-<STAMP>/       # or weekly/…, monthly/…
 │   ├── db-<STAMP>.dump.age
 │   ├── storage-<STAMP>.tar.gz.age
+│   ├── storage-files-<STAMP>.sha256.age
 │   ├── evolution-<STAMP>.tar.gz.age      (when the volume exists)
 │   ├── <volume>-<STAMP>.tar.gz.age       (when TLS volumes exist)
-│   ├── SHA256SUMS                        # checksums for this set
+│   ├── SHA256SUMS                        # checksums for encrypted artifacts
 │   └── MANIFEST.txt                      # written last; marks a complete set
 ├── manifests/                        # present on host; reserved, not used by this engine
 ├── quarantine/                       # operator-controlled; scripts never write here
 ├── logs/                             # backup-<tier>.log and preflight write probe
-└── wal-archive/                      # reserved; WAL archiving is NOT enabled
+└── wal-archive/                      # dedicated WAL archive; optional overlay only
 ```
 
 | File | Contents |
 |---|---|
 | `db-<STAMP>.dump.age` | age-encrypted PostgreSQL custom-format dump |
 | `storage-<STAMP>.tar.gz.age` | age-encrypted `uploads` volume (clinical files) |
+| `storage-files-<STAMP>.sha256.age` | age-encrypted SHA-256 list for every individual uploaded file |
 | `evolution-<STAMP>.tar.gz.age` | age-encrypted Evolution/WhatsApp session volume, when present |
 | `<volume>-<STAMP>.tar.gz.age` | age-encrypted Caddy TLS state, when present |
-| `SHA256SUMS` | SHA-256 for every artifact in the set |
-| `MANIFEST.txt` | Timestamp, tier, mount UUID, filesystem, database/volume names, sizes, checksums, PostgreSQL version, Git commit, encryption state, format version |
+| `SHA256SUMS` | SHA-256 for every encrypted artifact in the set |
+| `MANIFEST.txt` | Backup ID, format/version, timestamp, tier, mount UUID, filesystem, consistency mode, quiesced services, pre-quiesce WAL LSN, database/volume names, encrypted and plaintext checksums, sizes, file count, PostgreSQL version, Git commit and encryption state |
 
-`MANIFEST.txt` is written last and marks a complete set. Artifacts are staged
-in a hidden temporary directory inside the set directory and checksummed before
-publication. A failed run removes only the set directory it created; older sets
-are never touched. Retention is an operator/policy decision; no automatic
-deletion exists.
+Format 4 adds `backup_id`, `manifest_version=4`, `encryption_status=encrypted`,
+`consistency_mode`, `quiesced_services`, `wal_lsn_before_quiesce`,
+`database_plain_sha256`, `storage_plain_sha256`, the
+`storage_files_checksums*` fields and `storage_files_count`. The verifier and
+restore script also accept legacy format 3 sets, but format 3 has no per-file
+checksum list and no plaintext-content verification.
+
+`MANIFEST.txt` is written last and marks a complete set. Artifacts are built in
+a hidden `.stage-<set>-<pid>` directory in the tier, **outside** the final set,
+and the published set appears through a single directory `mv` only after the
+plaintext hashes are recorded, artifacts are encrypted, and `SHA256SUMS` is
+verified. A failed run removes only the staging directory it created; older
+sets are never touched by `backup.sh`.
 
 The database dump and the storage archive are still sequential, not a
-point-in-time snapshot. Stop writers during the backup window (see
-`BACKUP_QUIESCE_SERVICES`) or accept the small drift window. A database dump
-without its matching storage archive is not a usable restore.
+point-in-time snapshot. The default writer list is `backend web evolution`;
+the `db` service is always refused in that list. An empty list is accepted only
+with the isolated-test acknowledgement `BACKUP_ALLOW_WRITER_DRIFT=1`. Format 4
+records the chosen consistency mode and the WAL LSN observed before writers
+were stopped as evidence, but this is **not** WAL archiving and does not reduce
+RPO. A database dump without its matching storage archive is not a usable
+restore.
 
 ## Automated backup
 
@@ -70,11 +84,17 @@ Useful environment variables:
 | `BACKUP_AGE_RECIPIENT` | empty | **Required.** age public recipient; every artifact is encrypted and plaintext removed. |
 | `BACKUP_REQUIRE_ENCRYPTION` | `1` | Must be `1` (or unset). Setting `0` is rejected; plaintext backups are never produced. |
 | `BACKUP_OFFSITE_REMOTE` | empty | Legacy rclone option only. `rclone` is not installed on the verified host; no off-site copy is claimed. |
-| `BACKUP_QUIESCE_SERVICES` | empty | Space-separated writers to stop for the dump/tar window, e.g. `backend web evolution`. Never include `db`. Restarted on success or failure. |
+| `BACKUP_QUIESCE_SERVICES` | `backend web evolution` | Space-separated writers to stop for the dump/tar window. Never include `db`. Restarted on success or failure. |
+| `BACKUP_ALLOW_WRITER_DRIFT` | `0` | Test-only acknowledgement for an empty quiesce list. Do not use for a production source. |
 | `BACKUP_MIN_FREE_MB` | `1024` | Refuse to start below this much free space in the tier directory. |
 | `STORAGE_VOLUME` | `ultrasound_clinic_storage` | Uploads volume name. |
 | `EVOLUTION_VOLUME` | `ultrasound_clinic_evolution_instances` | Evolution session volume name. |
 | `CADDY_VOLUMES` | `ultrasound_clinic_caddy_data ultrasound_clinic_caddy_config` | TLS volumes; missing volumes are warned about. |
+
+`BACKUP_TEST_MODE=1` together with `BACKUP_SOURCE_MODE=local` is an
+**isolated-test-only** path that exercises real `pg_dump`, `tar` and `age`
+against a disposable database and directory. It refuses the production
+`BACKUP_ROOT`; never set either variable on a production host.
 
 ### Encryption and internal SATA backup storage (approved production architecture)
 
@@ -113,12 +133,14 @@ its UUID and filesystem match the approved values, all seven required
 directories exist, the destination resolves inside the mount, and the target is
 writable. There is no fallback to the root filesystem. A missing
 `BACKUP_AGE_RECIPIENT`, a disabled `BACKUP_REQUIRE_ENCRYPTION`, or a missing
-`age` binary also fails closed. WAL archiving remains **disabled**; the
-`wal-archive/` directory is reserved only.
+`age` binary also fails closed. The base Compose stack still has WAL archiving
+**disabled**. The optional `docker-compose.pitr.yml` overlay can enable it on a
+dedicated mount, but the overlay is repository configuration only and has not
+been applied to production. See “WAL archiving and point-in-time recovery” below.
 
 Capacity is checked in the tier directory before every backup after validation.
-No schedules, timers, alert delivery or retention deletion are enabled by this
-phase.
+Retention is available as a separate explicit script (see below), but no
+schedule, timer, alert delivery or automatic deletion is enabled by this change.
 
 ## Verify backup sets (read-only)
 
@@ -128,14 +150,20 @@ phase.
 ```
 
 The verifier discovers `clinic-<tier>-<STAMP>` set directories across `daily/`,
-`weekly/` and `monthly/`. For each `MANIFEST.txt` it checks that declared
-artifacts exist, are age-encrypted, match their declared SHA-256 and size, and
-pass `SHA256SUMS`. It also checks manifest/directory consistency, undeclared
+`weekly/` and `monthly/` and accepts `backup_format=3` or `4`. For each
+`MANIFEST.txt` it checks that declared artifacts exist, are age-encrypted,
+match their declared SHA-256 and size, and pass `SHA256SUMS`. Format 4 must also
+carry a backup ID, manifest version, encryption status, consistency mode,
+plaintext hashes and the encrypted per-file checksum artifact. `SHA256SUMS`
+lines are checked for strict `64-hex + separator + filename` syntax before
+`sha256sum -c` is trusted, because `sha256sum -c` can exit 0 when some lines are
+malformed. The verifier also checks manifest/directory consistency, undeclared
 or missing checksum entries, orphan artifacts, incomplete sets, set age and
 directory/file permissions. It validates the same mount/UUID/filesystem
 assumptions as the producer and never writes, decrypts, or contacts the
-database. `BACKUP_VERIFY_SKIP_MOUNT_CHECK=1` exists only for isolated synthetic
-tests and must never be used in production.
+database. Decrypted-content verification is performed by `restore-backup.sh`,
+not by this read-only verifier. `BACKUP_VERIFY_SKIP_MOUNT_CHECK=1` exists only
+for isolated synthetic tests and must never be used in production.
 
 ```bash
 # Monitoring example: fail if the newest complete set is older than 26 hours.
@@ -148,14 +176,38 @@ Expected result for the current repository state is **failure**: the legacy
 manifest or checksums. It is preserved unchanged and must not be moved,
 deleted, or presented as a recovery source without an owner decision.
 
+## Retention (explicit, never automatic)
+
+`scripts/backup-retention.sh` plans per-tier retention from verified complete
+sets only. Dry-run is the default and performs no writes:
+
+```bash
+./scripts/backup-retention.sh --root /mnt/clinic-backups
+```
+
+Deletion requires both flags and is refused otherwise:
+
+```bash
+./scripts/backup-retention.sh --root /mnt/clinic-backups \
+  --apply --confirm DELETE --keep-daily 7 --keep-weekly 4 --keep-monthly 12
+```
+
+Limits are clamped to at least 1 so the newest valid set in each tier is always
+kept. Invalid, incomplete or checksum-dirty sets are reported as warnings and
+left untouched for operator review; they are never automatically deleted. The
+script re-validates manifest declarations, artifact hashes/sizes and strict
+`SHA256SUMS` syntax before adding a set to its deletion plan. No cron job,
+systemd timer or monitoring hook installs this script; scheduling remains an
+owner decision.
+
 ### Legacy backup sets (pre-manifest dumps)
 
-> **Phase 8.3.1 compatibility note:** the current verifier only accepts the
-> `clinic-<tier>-<STAMP>/MANIFEST.txt` convention with `backup_format=3` and
-> `SHA256SUMS`. The `backup_format=1` staging example below is retained as
-> historical handling guidance; those staged copies will be reported as
-> non-compliant by the current verifier and must not be treated as production
-> backups.
+> **Phase 9.4 compatibility note:** the current verifier accepts the
+> `clinic-<tier>-<STAMP>/MANIFEST.txt` convention with `backup_format=3` or `4`
+> and `SHA256SUMS`. New sets are always format 4. The `backup_format=1` staging
+> example below is retained as historical handling guidance; those staged
+> copies will be reported as non-compliant by the current verifier and must not
+> be treated as production backups.
 
 Older sets may contain only `db-<STAMP>.dump`, sometimes with a matching
 `storage-<STAMP>.tar.gz`, but no `SHA256SUMS-*` or `MANIFEST-*`. The verifier
@@ -214,18 +266,63 @@ If no storage archive exists, omit the second argument. Do not use a legacy
 dump for a production restore until the staged verifier and drill both pass and
 the missing companions are recorded as accepted limitations.
 
+## Isolated full-set restore (validated in Phase 9.4)
+
+`scripts/restore-backup.sh` restores a complete encrypted set into a
+**disposable** PostgreSQL database and an empty directory. It does not
+overwrite a production database or volume. It is the only path that exercises
+decryption plus per-file checksum validation end to end.
+
+```bash
+./scripts/restore-backup.sh \
+  --set /mnt/clinic-backups/daily/clinic-daily-<STAMP> \
+  --target-db clinic_restore \
+  --confirm-target clinic_restore \
+  --target-dir /secure/restore/storage \
+  --key-file /secure/clinic-backup-key.txt \
+  --pghost 127.0.0.1 --pgport 55433 --pguser clinic
+```
+
+Before touching the target it validates manifest topology and format (3 or 4),
+declared artifacts, strict `SHA256SUMS` syntax, encrypted artifact hashes and
+sizes, then decrypts with the supplied private key. For format 4 it also
+verifies the decrypted database/archive/checksum-list hashes against the
+manifest. It checks the `PGDMP` dump header, tar readability and rejects
+absolute or parent-traversal paths in the storage archive.
+
+Safety rules: `--target-db` and `--confirm-target` must match; target names must
+end in `_restore`, `_drill` or `_test`; reserved production names, Compose
+service host `db` and port `55432` are refused; the storage target must already
+exist and be empty. The source set is opened read-only, and a database created
+by the run is dropped again on failure. `--skip-db` and `--skip-storage` exist
+only for deliberately partial diagnostics and reduce assurance accordingly.
+Keep the age private key in separate escrow with mode `0600`; it is never part
+of the backup set or printed by these scripts.
+
+In the final Phase 9.4 synthetic full-set drill (backup ID
+`8bf72d7e-2a0a-42b3-b761-063a78375530`), backup completion took **341 ms** and
+isolated restore completion took **1003 ms** for a small migrated database with
+three uploaded files. Earlier runs measured 311 ms / 913 ms and 337 ms / 999 ms.
+These are small-data drill timings, **not a production RTO commitment**.
+
 ## Restore drill (safe, repeatable)
 
 ```bash
-./scripts/restore-drill.sh backups/db-YYYYMMDDTHHMMSSZ.dump
+DRILL_DB=clinic_restore_drill \
+RESTORE_TARGET_CONFIRM=clinic_restore_drill \
+  ./scripts/restore-drill.sh backups/db-YYYYMMDDTHHMMSSZ.dump
+
 # Optional second argument: also reconcile the matching storage archive.
-./scripts/restore-drill.sh \
-  backups/db-YYYYMMDDTHHMMSSZ.dump \
-  backups/storage-YYYYMMDDTHHMMSSZ.tar.gz
+DRILL_DB=clinic_restore_drill \
+RESTORE_TARGET_CONFIRM=clinic_restore_drill \
+  ./scripts/restore-drill.sh \
+    backups/db-YYYYMMDDTHHMMSSZ.dump \
+    backups/storage-YYYYMMDDTHHMMSSZ.tar.gz
 ```
 
 The drill restores into `clinic_restore_drill`; the name must end in `_drill`
-and contain only letters, digits, and underscores. It:
+and contain only letters, digits, and underscores. `RESTORE_TARGET_CONFIRM`
+must exactly equal `DRILL_DB` — there is no implicit target confirmation. It:
 
 1. Refuses `.age` inputs and prints the decryption command to run first.
 2. Verifies the dump (and storage archive) against the matching
@@ -252,37 +349,145 @@ change, and before relying on a new USB backup set.
 age -d -i /secure/clinic-backup-key.txt \
   -o /secure/db-YYYYMMDDTHHMMSSZ.dump \
   backups/db-YYYYMMDDTHHMMSSZ.dump.age
-./scripts/restore-drill.sh /secure/db-YYYYMMDDTHHMMSSZ.dump
+DRILL_DB=clinic_restore_drill \
+RESTORE_TARGET_CONFIRM=clinic_restore_drill \
+  ./scripts/restore-drill.sh /secure/db-YYYYMMDDTHHMMSSZ.dump
 ```
 
-## Point-in-time recovery (validated in isolation, not deployed)
+## WAL archiving and point-in-time recovery (validated in isolation, not deployed)
 
-Phase 6.1 proved that PITR works with this PostgreSQL 16 stack: a disposable
-cluster used `wal_level=replica`, `archive_mode=on`, a WAL `archive_command`,
-and `archive_timeout=10s`; a base backup plus six archived WAL files restored
-correctly by both restore point and target time. See
-`docs/PRODUCTION_READINESS_PHASE6_1.md` §7.
+Phase 6.1 first proved PITR on this PostgreSQL 16 stack with a disposable cluster.
+Phase 9.5 adds a complete, fail-closed implementation and a separate
+`pitr-base-1` base-backup/restore path. The base Compose file is unchanged; all
+WAL/PITR configuration lives in the optional `docker-compose.pitr.yml` overlay.
+Nothing has been applied to production. See
+`docs/PRODUCTION_READINESS_PHASE9_5.md` for evidence and limitations.
 
-The approved production design uses the internal SATA backup HDD at
-`/mnt/clinic-backups/wal-archive` with `archive_timeout=300s` for a target RPO
-of five minutes. **The 5-minute RPO is not claimed until an isolated
-point-in-time recovery succeeds on the Ubuntu host.** Production still has no
-WAL archiving and no PITR runbook activation. Do not assume a better RPO until
-the following are deployed and rehearsed on the target host with written
-approval:
+A format-4 dump set from `backup.sh` is still a logical backup and is **not** a
+PITR base set. PITR requires a `pitr-base-1` set created by
+`scripts/pitr-base-backup.sh` plus the matching WAL segments in the dedicated
+archive. Never mix the two set formats.
 
-- a dedicated, access-controlled WAL archive destination on the verified internal
-  backup HDD mount, with `mountpoint` checked by `archive_command`;
-- `wal_level=replica`, `archive_mode=on`, a tested `archive_command`, and the
-  chosen `archive_timeout=300s`/5-minute RPO target;
-- base backups retained with their matching WAL history;
-- monitoring for archive failures and WAL retention growth;
-- a documented restore flow using `restore_command`, `recovery.signal`, and
-  either `recovery_target_name` or `recovery_target_time`.
+### WAL configuration in the optional overlay
 
-Never change production PostgreSQL settings or restart the database for PITR
-without explicit approval. The production RPO remains unbounded until this is
-deployed and verified.
+| Setting | Value | Purpose |
+|---|---|---|
+| `wal_level` | `replica` | Emit enough WAL for physical recovery. |
+| `archive_mode` | `on` | Continuous archiving. |
+| `archive_command` | `/bin/sh /clinic/deploy/wal-archive.sh %p %f` | Fail-closed, POSIX-sh archiver; non-zero means PostgreSQL retries. The repository `deploy/` directory is mounted read-only at `/clinic/deploy` by the overlay. |
+| `archive_timeout` | `${WAL_ARCHIVE_TIMEOUT_SECONDS:-300}` | Five-minute target for partially filled segments. |
+| `max_wal_senders` | `${WAL_MAX_SENDERS:-10}` | Allows `pg_basebackup -X stream`. |
+| `wal_keep_size` | `${WAL_KEEP_SIZE:-128MB}` | Local cushion while archive catches up. |
+| `WAL_ARCHIVE_DIR` | `/wal-archive` | Container-side dedicated mount. |
+| host bind | `${WAL_ARCHIVE_HOST_DIR:-/mnt/clinic-backups/wal-archive}:/wal-archive:rw` | Keeps WAL on the approved backup disk, not in `db_data`. |
+| `WAL_ARCHIVE_MIN_FREE_MB` | `512` | Reserve before publishing a segment. |
+| `WAL_ARCHIVE_SKIP_MOUNT_CHECK` | `0` | Fail unless the destination is a real mount. |
+
+`deploy/wal-archive.sh` is POSIX sh and self-contained so it does not depend on
+host-specific shell tooling. The validated `postgres:16-alpine` image does ship
+`bash` and `mountpoint` but not `findmnt`; the helper prefers those tools when
+present and otherwise detects a real mount from `/proc/self/mountinfo` and reads
+the filesystem type from `/proc/self/mounts`. UUID verification is optional and is empty by default in
+the container because `/dev/disk/by-uuid` is not normally mounted there; the
+host mount must still use the approved UUID. The helper checks the mount,
+optional UUID/filesystem match, source size, free space, and destination
+conflicts. It stages the segment, writes a `<segment>.sha256` sidecar
+(`<sha256>  <filename>`), and publishes both with atomic hard links. It never
+overwrites a different valid file, and logs redacted `key=value` events to
+stderr for PostgreSQL's log. Any failure is non-zero, so PostgreSQL retains and
+retries the WAL file.
+
+`deploy/wal-restore.sh` is the matching `restore_command`. It accepts
+PostgreSQL's `RECOVERYXLOG`/`RECOVERYHISTORY` temporary `%p` names, requires the
+segment and its sidecar, verifies size and SHA-256, then atomically publishes
+the file into `pg_wal`. Missing or corrupt WAL produces a clear non-zero error
+so recovery stops instead of silently skipping history.
+
+`WAL_ARCHIVE_SKIP_MOUNT_CHECK=1` exists only for isolated tests. Do not set it
+in production. The `P7_WAL_DIRS`, `P7_WAL_COUNT_*` and `P7_WAL_AGE_*` settings in
+`deploy/monitor.env.example` and `docker-compose.monitoring.yml` feed the
+existing read-only `scripts/p7-check-wal.sh` backlog check; no alert delivery or
+monitoring service is installed by this change.
+
+### Create a PITR base set
+
+The host WAL archive directory must already exist as a dedicated, access-controlled
+mount. With the overlay applied, an example from a trusted host is:
+
+```bash
+./scripts/pitr-base-backup.sh \
+  --pghost 127.0.0.1 --pgport 55432 --pguser <db-user> \
+  --pgdatabase <db-name> \
+  --wal-archive-dir /mnt/clinic-backups/wal-archive \
+  --backup-root /mnt/clinic-backups --tier daily \
+  --age-recipient <age-public-recipient>
+```
+
+Use the production database port only for an authorised production run; the test
+scripts use isolated ports. The script refuses a source without
+`wal_level=replica`/`logical`, `archive_mode=on` and a non-empty
+`archive_command`. It uses `pg_basebackup -Fp -X stream`, records the PostgreSQL
+version, UTC creation time, start/stop LSNs, timeline, WAL segment size, WAL
+archive location, required WAL range, per-segment SHA-256 values, base artifact
+checksum/size and encryption mode in `MANIFEST.txt`, and writes `SHA256SUMS`
+last.
+
+A set is published only when every required WAL segment exists, has the expected
+size, matches its sidecar, and matches the checksum recorded in the manifest.
+Missing or corrupt WAL stops the run before the set is published, so an
+incomplete base set is never marked `pitr_ready=true`. With `--age-recipient`,
+the base artifact is age-encrypted and the private key remains in separate
+escrow.
+
+### Restore to a point in time
+
+Restores are deliberately restricted to new, isolated targets:
+
+```bash
+./scripts/pitr-restore.sh \
+  --set /mnt/clinic-backups/daily/clinic-daily-<STAMP>-pitr \
+  --target-time '2026-11-21T12:34:56+00' \
+  --target-dir /secure/restore/pitr_before_incident \
+  --confirm-target-dir /secure/restore/pitr_before_incident \
+  --pgport 55437 --pguser <db-user> \
+  --key-file /secure/clinic-backup-key.txt
+```
+
+`--target-dir` and `--confirm-target-dir` must match exactly. The target directory
+must not exist, must be absolute, must end in `_restore`, `_drill` or `_test`,
+and must not be production-like or inside protected paths. Ports `5432` and
+`55432` are refused. All manifest, base-artifact and WAL validation happens
+before the target directory is created; on any failure the target is removed.
+
+The restore extracts the verified base, creates `recovery.signal`, writes a
+fail-closed `restore_command`, sets `recovery_target_time`,
+`recovery_target_action='pause'` and `recovery_target_inclusive='on'`, disables
+archiving on the recovered instance, and starts PostgreSQL on the isolated port.
+It verifies that the instance is still in recovery, that PostgreSQL's log
+confirms the target was reached, and reports the replay timestamp and elapsed
+recovery time. The recovered instance is left paused for inspection; promote it
+only after the target is verified.
+
+### Operational requirements before production use
+
+Do not enable the overlay without written approval. The following remain owner
+decisions and are not implemented by this repository-only change:
+
+- provision `/mnt/clinic-backups/wal-archive` as a dedicated `0700` mount owned
+  by the PostgreSQL runtime user, with the expected UUID/filesystem recorded;
+- apply the overlay and restart `db` in a controlled maintenance window;
+- schedule PITR base backups and retain each set with all WAL it requires;
+- add a WAL retention/deletion policy with capacity alarms (no pruning is
+  automatic);
+- install the WAL backlog monitor and route alerts;
+- verify age key escrow and restore permissions on the target host;
+- rehearse a full restore and measure production-shaped RTO.
+
+The approved five-minute RPO is a design target, not a claimed result. The
+synthetic drill measured sub-second archive delay and roughly two-second
+recovery for a small database, but production has no WAL archiving enabled, so
+the current production RPO remains unbounded. Never change production
+PostgreSQL settings or restart the database for PITR without explicit approval.
 
 ## Ubuntu host permissions
 
@@ -332,14 +537,17 @@ groups, ownership or permissions until that plan is approved.
    Do not continue if this fails or if free space is low.
 3. **Verify the chosen set before changing anything.**
    ```bash
-   cd backups
-   sha256sum -c SHA256SUMS-<STAMP>.txt
-   gzip -t storage-<STAMP>.tar.gz
-   cat MANIFEST-<STAMP>.txt
+   ./scripts/backup-verify.sh
+   SET=/mnt/clinic-backups/<tier>/clinic-<tier>-<STAMP>
+   cat "$SET/MANIFEST.txt"
+   ( cd "$SET" && sha256sum -c SHA256SUMS )
    ```
-   Confirm the manifest's database name, Postgres version, and Git commit are
-   compatible with the deployed code. If the dump is newer than the code, stop
-   and deploy the matching release first. Decrypt `.age` artifacts before use.
+   Confirm the manifest's backup ID, database name, consistency mode, Postgres
+   version and Git commit are compatible with the deployed code. If the dump is
+   newer than the code, stop and deploy the matching release first. Decrypt
+   `.age` artifacts on a trusted host before use. Do **not** use
+   `restore-backup.sh` for this production overwrite: it intentionally refuses
+   production-style database names and port `55432`.
 4. **Restore the database.** Use a single transaction so a failure rolls back
    instead of leaving a half-restored database:
    ```bash
