@@ -1,0 +1,153 @@
+# Template systemd service for the Ultrasound Clinic Docker Compose stack.
+#
+# Resolves startup ordering and host IP binding dependencies:
+#   1. Starts strictly after docker.service and tailscaled.service.
+#   2. Verifies Tailscale backend state is "Running" (authenticated session).
+#   3. Verifies TAILSCALE_IP is assigned to tailscale0 using exact field comparison.
+#   4. Verifies LAN_IP is present on the designated or host interface.
+#   5. Ensures orderly shutdown of the compose services.
+#
+# Exact IP Matching:
+#   IP checks use `ip -o -4 addr show` parsed with `awk '{print $4}' | cut -d/ -f1`
+#   and matched exactly with `grep -Fx`. No regex or substring matching is used,
+#   preventing 100.1.2.3 from matching 100.1.2.30.
+#
+# Interface Selection:
+#   - Tailscale IP: strictly verified on interface `tailscale0`.
+#   - LAN IP: if `LAN_INTERFACE` is defined in /etc/clinic/clinic.env (e.g. `eno1`),
+#     it is verified specifically on that interface. Otherwise, it is verified
+#     across all host IPv4 interfaces.
+#
+# Timeout behaviour:
+#   ExecStartPre checks wait up to 60 seconds (30 iterations × 2s) for
+#   Tailscale readiness. If Tailscale is not ready within 60 seconds, the
+#   pre-flight check fails and systemd marks the unit as failed.
+#   TimeoutStartSec=180 is the outer limit for all ExecStartPre + ExecStart combined.
+#
+# Recovery if Tailscale takes longer than 60 seconds:
+#   1. Check Tailscale authentication:  tailscale status
+#   2. If unauthenticated:              sudo tailscale up
+#   3. If authenticated but no IP:      sudo systemctl restart tailscaled
+#   4. After Tailscale is confirmed:    sudo systemctl start clinic.service
+#   See docs/LAN_ACCESS.md § "Recovering from a failed Tailscale startup check"
+#   for the full operator runbook.
+#
+# Shutdown behaviour:
+#   ExecStop runs `docker compose ... down` to fully remove containers and
+#   their default network, ensuring a clean state on restart.
+#   `systemctl disable --now clinic.service` stops the running application
+#   AND removes it from automatic boot startup.
+#
+# Installation on the production host (requires root/sudo):
+#   sudo cp deploy/clinic.service /etc/systemd/system/clinic.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable clinic.service
+#
+# Rollback / uninstall:
+#   sudo systemctl disable --now clinic.service   # stops app + removes from boot
+#   sudo rm -f /etc/systemd/system/clinic.service
+#   sudo systemctl daemon-reload
+#
+# Do NOT apply to the target host without explicit operational approval.
+
+[Unit]
+Description=Ultrasound Clinic Management System (Docker Compose Stack)
+Documentation=file:/opt/clinic/docs/LAN_ACCESS.md
+After=network-online.target docker.service tailscaled.service
+Wants=network-online.target docker.service tailscaled.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/clinic
+EnvironmentFile=-/etc/clinic/clinic.env
+
+# Pre-flight check 1: Verify Tailscale backend is Running and TAILSCALE_IP is assigned to tailscale0.
+#
+# Step A: Safe JSON state extraction. Handles missing tailscale binary, socket down,
+#         or unexpected JSON output safely without crashing.
+# Step B: Exact IPv4 address field comparison using ip -o -4 addr show, awk, and grep -Fx.
+ExecStartPre=/usr/bin/bash -c '\
+  set -euo pipefail; \
+  if [ -z "${TAILSCALE_IP:-}" ]; then \
+    echo "ERROR: TAILSCALE_IP is not set in environment." >&2; \
+    exit 1; \
+  fi; \
+  echo "Checking Tailscale backend readiness..."; \
+  READY=0; \
+  for i in $(seq 1 30); do \
+    STATE=$(/usr/bin/tailscale status --json 2>/dev/null \
+      | awk -F'\''"'\'' '\''/BackendState/ {print $4}'\'' || true); \
+    if [ "$STATE" = "Running" ]; then \
+      echo "Tailscale backend is Running (attempt $i/30)."; \
+      READY=1; \
+      break; \
+    fi; \
+    echo "Waiting for Tailscale backend (attempt $i/30, state: \"${STATE:-NotReady}\")..."; \
+    sleep 2; \
+  done; \
+  if [ "$READY" -ne 1 ]; then \
+    echo "ERROR: Tailscale did not reach Running state within 60 seconds." >&2; \
+    echo "RECOVERY: Run '\''tailscale status'\'' or '\''sudo tailscale up'\''. See docs/LAN_ACCESS.md." >&2; \
+    exit 1; \
+  fi; \
+  echo "Verifying Tailscale IP ${TAILSCALE_IP} on tailscale0..."; \
+  FOUND_IP=$(ip -o -4 addr show dev tailscale0 2>/dev/null \
+    | awk '\''{print $4}'\'' | cut -d/ -f1 | grep -Fx "${TAILSCALE_IP}" || true); \
+  if [ "$FOUND_IP" = "${TAILSCALE_IP}" ]; then \
+    echo "Tailscale IP ${TAILSCALE_IP} verified exactly on tailscale0."; \
+  else \
+    echo "ERROR: Tailscale IP ${TAILSCALE_IP} is not assigned to tailscale0." >&2; \
+    echo "Current tailscale0 IPv4 addresses:" >&2; \
+    ip -o -4 addr show dev tailscale0 2>&1 | awk '\''{print $4}'\'' >&2 || true; \
+    echo "RECOVERY: Run '\''sudo tailscale up'\'' then '\''sudo systemctl start clinic.service'\''." >&2; \
+    exit 1; \
+  fi'
+
+# Pre-flight check 2: Verify that LAN_IP is assigned.
+# If LAN_INTERFACE is set, checks that interface; otherwise checks all host interfaces.
+# Uses exact complete string match (grep -Fx) on the parsed IP field.
+ExecStartPre=/usr/bin/bash -c '\
+  set -euo pipefail; \
+  if [ -n "${LAN_IP:-}" ]; then \
+    echo "Verifying LAN IP ${LAN_IP}..."; \
+    if [ -n "${LAN_INTERFACE:-}" ]; then \
+      FOUND_LAN=$(ip -o -4 addr show dev "${LAN_INTERFACE}" 2>/dev/null \
+        | awk '\''{print $4}'\'' | cut -d/ -f1 | grep -Fx "${LAN_IP}" || true); \
+      TARGET_DESC="interface ${LAN_INTERFACE}"; \
+    else \
+      FOUND_LAN=$(ip -o -4 addr show 2>/dev/null \
+        | awk '\''{print $4}'\'' | cut -d/ -f1 | grep -Fx "${LAN_IP}" || true); \
+      TARGET_DESC="host interfaces"; \
+    fi; \
+    if [ "$FOUND_LAN" = "${LAN_IP}" ]; then \
+      echo "LAN IP ${LAN_IP} verified exactly on ${TARGET_DESC}."; \
+    else \
+      echo "ERROR: LAN IP ${LAN_IP} is not assigned on ${TARGET_DESC}." >&2; \
+      echo "Available host IPv4 addresses:" >&2; \
+      ip -o -4 addr show 2>&1 | awk '\''{print $2, $4}'\'' >&2 || true; \
+      exit 1; \
+    fi; \
+  fi'
+
+# Start the Docker Compose stack with Tailscale and LAN overlays
+ExecStart=/usr/bin/docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.tailscale.yml \
+  -f docker-compose.lan.yml \
+  up -d --remove-orphans
+
+# Stop the Compose stack cleanly — `down` removes containers and default network
+# for a clean state on restart.
+ExecStop=/usr/bin/docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.tailscale.yml \
+  -f docker-compose.lan.yml \
+  down
+
+TimeoutStartSec=180
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
