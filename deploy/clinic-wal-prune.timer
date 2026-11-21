@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily WAL retention review (DRY RUN by default)
+Documentation=file:/opt/clinic/docs/backup-restore.md
+
+[Timer]
+# WAL is only eligible for pruning when it is older than the earliest required
+# segment of EVERY retained pitr_ready base backup. The newest archived segment
+# is never removed. Deletion needs backup-scheduler.sh wal-prune --apply --confirm DELETE.
+OnCalendar=*-*-* 05:30:00 Africa/Cairo
+Persistent=true
+RandomizedDelaySec=10m
+Unit=clinic-backup-schedule@wal-prune.service
+
+[Install]
+WantedBy=timers.target

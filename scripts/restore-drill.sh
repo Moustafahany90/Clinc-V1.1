@@ -7,7 +7,9 @@
 #     backups/storage-YYYYMMDDTHHMMSSZ.tar.gz
 #
 # The drill database name must end in "_drill"; the script refuses to run
-# otherwise. Set KEEP_DRILL_DB=1 to keep it for inspection.
+# otherwise. RESTORE_TARGET_CONFIRM must exactly equal DRILL_DB: there is no
+# implicit target and Production is never a valid drill target. Set
+# KEEP_DRILL_DB=1 to keep the disposable database for inspection.
 #
 # If a matching SHA256SUMS-<STAMP>.txt sits beside the dump, the dump (and the
 # storage archive when supplied) is verified before anything is restored.
@@ -116,6 +118,8 @@ if ! printf '%s' "$DRILL_DB" | grep -Eq '^[A-Za-z0-9_]+_drill$'; then
   echo "Refusing to restore into '$DRILL_DB': use only letters, digits and underscores." >&2
   exit 1
 fi
+[ "${RESTORE_TARGET_CONFIRM:-}" = "$DRILL_DB" ] || die \
+  "refusing to restore without explicit target confirmation: set RESTORE_TARGET_CONFIRM='$DRILL_DB'."
 
 command -v docker >/dev/null 2>&1 || die "docker is not installed or not on PATH."
 docker compose version >/dev/null 2>&1 || die "the Docker Compose plugin is not available."

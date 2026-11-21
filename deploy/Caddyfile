@@ -13,6 +13,13 @@
 # APP_ORIGIN must be https://<CLINIC_DOMAIN> and COOKIE_SECURE=true when
 # NODE_ENV=production; the backend refuses to start otherwise.
 
+# Explicit HTTP-to-HTTPS redirect. Caddy's default automatic HTTPS also does
+# this, but declaring it makes the intent testable in an isolated local run
+# without requesting a production certificate.
+http://{$CLINIC_DOMAIN} {
+	redir https://{host}{uri} permanent
+}
+
 {$CLINIC_DOMAIN} {
 	encode zstd gzip
 	# Phase 7.1: logging-only redaction. Strip everything from the first '?' in

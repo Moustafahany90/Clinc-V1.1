@@ -42,6 +42,12 @@ if [ "$mount_ok" = "1" ]; then
   for set_dir in $(backup_list_set_dirs); do
     manifest="${set_dir}/MANIFEST.txt"
     [ -f "$manifest" ] || continue
+    # Phase 9.6: a WAL-linked PITR base set uses a different manifest schema.
+    # It must not be treated as the "last successful logical database backup"
+    # or passed to backup-verify.sh, which accepts only formats 3 and 4. It is
+    # monitored separately by p7-check-pitr.sh.
+    fmt="$(sed -n 's/^backup_format=//p' "$manifest" | head -n 1 | tr -d '\r')"
+    case "$fmt" in 3|4) : ;; *) continue ;; esac
     stamp="$(sed -n 's/^created_utc=//p' "$manifest" | head -n 1 | tr -d '\r')"
     stamp="$(printf '%s' "$stamp" | sed -n 's/^\([0-9]\{8\}T[0-9]\{6\}Z\)$/\1/p')"
     [ -n "$stamp" ] || continue

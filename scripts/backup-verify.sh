@@ -147,7 +147,20 @@ for set_dir in $(backup_list_set_dirs); do
     "manifest checksums='${M[checksums]:-}' is not 'SHA256SUMS'."
 
   fmt="${M[backup_format]:-}"
-  [ "$fmt" = "3" ] || error "manifest backup_format='${fmt:-missing}' (expected 3)."
+  case "$fmt" in
+    3|4) ;;
+    *) error "manifest backup_format='${fmt:-missing}' (expected 3 or 4)." ;;
+  esac
+
+  if [ "$fmt" = "4" ]; then
+    [ -n "${M[backup_id]:-}" ] || error "manifest '$base' is missing required field 'backup_id'."
+    [ "${M[manifest_version]:-}" = "4" ] || error \
+      "manifest '$base' has manifest_version='${M[manifest_version]:-}' (expected 4)."
+    [ "${M[encryption_status]:-}" = "encrypted" ] || error \
+      "manifest '$base' has encryption_status='${M[encryption_status]:-}' (expected encrypted)."
+    [ -n "${M[consistency_mode]:-}" ] || error \
+      "manifest '$base' is missing required field 'consistency_mode'."
+  fi
 
   encryption="${M[encryption]:-}"
   if [ "$encryption" != "age" ]; then
@@ -185,6 +198,17 @@ for set_dir in $(backup_list_set_dirs); do
 
   check_artifact "database" "${M[database_dump]:-}" "${M[database_sha256]:-}" "${M[database_bytes]:-}"
   check_artifact "storage" "${M[storage_archive]:-}" "${M[storage_sha256]:-}" "${M[storage_bytes]:-}"
+  if [ "$fmt" = "4" ]; then
+    check_artifact "storage-file-checksums" "${M[storage_files_checksums]:-}" \
+      "${M[storage_files_checksums_sha256]:-}" "${M[storage_files_checksums_bytes]:-}"
+    [ -n "${M[storage_files_checksums_plain_sha256]:-}" ] || error \
+      "manifest '$base' is missing storage_files_checksums_plain_sha256."
+    case "${M[storage_files_count]:-}" in
+      ''|*[!0-9]*) error "manifest storage_files_count='${M[storage_files_count]:-}' is not numeric." ;;
+    esac
+    [ -n "${M[database_plain_sha256]:-}" ] || error "manifest '$base' is missing database_plain_sha256."
+    [ -n "${M[storage_plain_sha256]:-}" ] || error "manifest '$base' is missing storage_plain_sha256."
+  fi
   check_artifact "evolution" "${M[evolution_archive]:-}" "${M[evolution_sha256]:-}" "${M[evolution_bytes]:-}"
   for archive in ${M[caddy_archives]:-}; do
     [ "$archive" = "none" ] && continue
@@ -192,7 +216,18 @@ for set_dir in $(backup_list_set_dirs); do
   done
 
   if [ -f "$sums" ]; then
-    if sha256_check_file "$set_dir" >/dev/null 2>&1; then
+    # sha256sum -c exits 0 when some lines are valid and others are malformed;
+    # enforce a strict line format so a damaged checksum file cannot pass.
+    malformed=0
+    while IFS= read -r line || [ -n "$line" ]; do
+      [ -n "$line" ] || continue
+      if ! printf '%s\n' "$line" | grep -Eq '^[0-9a-f]{64} ( |\*).+$'; then
+        error "SHA256SUMS in '$base' has a malformed line."
+        malformed=1
+        break
+      fi
+    done < "$sums"
+    if [ "$malformed" -eq 0 ] && sha256_check_file "$set_dir" >/dev/null 2>&1; then
       echo "  checksums: verified (SHA256SUMS)"
     else
       error "checksum verification failed for '$base/SHA256SUMS'."

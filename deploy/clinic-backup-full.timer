@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily full logical database backup
+Documentation=file:/opt/clinic/docs/backup-restore.md
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 Africa/Cairo
+Persistent=true
+RandomizedDelaySec=10m
+Unit=clinic-backup-schedule@full.service
+
+[Install]
+WantedBy=timers.target

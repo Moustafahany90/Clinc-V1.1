@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily backup retention review (DRY RUN by default)
+Documentation=file:/opt/clinic/docs/backup-restore.md
+
+[Timer]
+# The scheduler defaults to --dry-run. Deletion requires an explicit operator
+# decision: backup-scheduler.sh retention --apply --confirm DELETE. Only expired
+# sets that pass verification are eligible; the newest valid set is always kept.
+OnCalendar=*-*-* 05:00:00 Africa/Cairo
+Persistent=true
+RandomizedDelaySec=10m
+Unit=clinic-backup-schedule@retention.service
+
+[Install]
+WantedBy=timers.target

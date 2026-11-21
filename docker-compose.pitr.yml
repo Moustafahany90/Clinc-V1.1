@@ -1,0 +1,56 @@
+# Phase 9.5 optional WAL archiving / PITR overlay.
+#
+# This overlay is REPOSITORY CONFIGURATION ONLY. It is not applied by the base
+# stack and must not be deployed to production without separate authorisation.
+#
+# Apply only after the host directory exists, is a dedicated mount on the
+# approved backup disk, and is writable only by the PostgreSQL runtime user.
+# Verify that user/UID from the actual image before setting ownership; do not
+# rely on a hardcoded UID. The path is only an example here:
+#   sudo install -d -m 0700 /mnt/clinic-backups/wal-archive
+#
+# Render/validate (no container start):
+#   docker compose -f docker-compose.yml -f docker-compose.pitr.yml config
+#
+# Start (only with separate authorisation):
+#   docker compose -f docker-compose.yml -f docker-compose.pitr.yml up -d
+#
+# The base stack's localhost-only database binding is inherited; this overlay
+# adds no public listener. WAL lives on the dedicated backup-disk mount, not in
+# db_data. archive_command fails closed on missing mount, low space, conflict
+# or checksum mismatch.
+services:
+  db:
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      # The archiver is POSIX sh and self-contained: postgres:16-alpine has no
+      # bash, mountpoint or findmnt. It reads /proc mount tables instead.
+      - "archive_command=/bin/sh /clinic/deploy/wal-archive.sh %p %f"
+      - -c
+      - "archive_timeout=${WAL_ARCHIVE_TIMEOUT_SECONDS:-300}"
+      - -c
+      - "max_wal_senders=${WAL_MAX_SENDERS:-10}"
+      - -c
+      - "wal_keep_size=${WAL_KEEP_SIZE:-128MB}"
+    environment:
+      WAL_ARCHIVE_DIR: /wal-archive
+      WAL_SEGMENT_SIZE: "16777216"
+      WAL_ARCHIVE_MIN_FREE_MB: "${WAL_ARCHIVE_MIN_FREE_MB:-512}"
+      WAL_ARCHIVE_SKIP_MOUNT_CHECK: "0"
+      # Optional. Leave empty in the container unless /dev/disk/by-uuid is
+      # mounted and the UUID can be verified there.
+      WAL_ARCHIVE_EXPECTED_UUID: "${WAL_ARCHIVE_EXPECTED_UUID:-}"
+      WAL_ARCHIVE_EXPECTED_FSTYPE: "${WAL_ARCHIVE_EXPECTED_FSTYPE:-ext4}"
+    volumes:
+      # archive_command invokes /clinic/deploy/wal-archive.sh. The WAL helpers
+      # live in the repository's deploy/ directory, which is mounted at its own
+      # top-level path. A nested mount under the read-only /clinic/scripts is
+      # not possible, so the two directories are mounted side by side.
+      - ./scripts:/clinic/scripts:ro
+      - ./deploy:/clinic/deploy:ro
+      - "${WAL_ARCHIVE_HOST_DIR:-/mnt/clinic-backups/wal-archive}:/wal-archive:rw"

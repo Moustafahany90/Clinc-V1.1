@@ -1,0 +1,19 @@
+[Unit]
+Description=Clinic backup scheduler job (%i)
+Documentation=file:/opt/clinic/docs/backup-restore.md
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/clinic/scripts/backup-scheduler.sh
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/clinic
+EnvironmentFile=-/etc/clinic/backup.env
+# %i is the job name: full, pitr-base, verify, retention or wal-prune.
+ExecStart=/bin/bash /opt/clinic/scripts/backup-scheduler.sh %i
+# A failed run must be visible; it never retries in a tight loop.
+TimeoutStartSec=2h
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
