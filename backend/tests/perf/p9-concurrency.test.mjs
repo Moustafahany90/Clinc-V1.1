@@ -470,6 +470,11 @@ test('concurrent walk-ins do not duplicate queue positions', async () => {
     duplicatePositions,
   };
   recordScenario('queue_walkin_position', outcome);
-  assert.equal(created, attempts.length, JSON.stringify(outcome));
+  // Fixed behavior: the exclusion constraint rejects overlapping slots. The
+  // earlier "all six succeed" expectation predates the 23P01 -> 409 mapping.
+  assert.equal(created, 1, JSON.stringify(outcome));
+  assert.equal(outcome.classifications['201:NONE'], 1, JSON.stringify(outcome));
+  assert.equal(outcome.classifications['409:APPOINTMENT_CONFLICT'], 5, JSON.stringify(outcome));
+  assert.equal(entries.length, 1, JSON.stringify(outcome));
   assert.deepEqual(duplicatePositions, [], 'concurrent walk-ins duplicated queue positions');
 });

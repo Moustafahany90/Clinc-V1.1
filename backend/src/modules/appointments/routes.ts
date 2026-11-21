@@ -7,11 +7,14 @@ import {
   clinicLocalToUtc,
   clinicMinutesOfDay,
   clinicDayRange,
+  dateOnlyToDb,
+  dbDateToDateOnly,
 } from '../../lib/time.js';
 import { parseBody, parseParams, parseQuery, uuidSchema, dateOnlySchema } from '../../lib/validate.js';
 import { authenticate, currentUser, requirePermission } from '../../middleware/auth.js';
 import { hasPermission } from '../../lib/permissions.js';
 import { auditFromRequest } from '../../lib/audit.js';
+import { acquireQueueAllocationLock, allocateQueuePosition } from '../../lib/queueLock.js';
 import {
   ACTIVE_STATUSES,
   assertTransitionAllowed,
@@ -422,7 +425,26 @@ appointmentsRouter.patch(
     }
 
     const appointment = await prisma.$transaction(async (tx) => {
+      // Lock order is calendar -> queue -> row writes. Walk-in allocation takes
+      // only the queue lock, so no path can acquire these in the reverse order.
       await lockDoctorCalendar(tx, doctorId);
+
+      const existingQueue = await tx.queueEntry.findUnique({
+        where: { appointmentId: id },
+      });
+      const targetQueueDateOnly = clinicDateString(startAt);
+      const queueMovesLogicalQueue = Boolean(
+        existingQueue &&
+          (existingQueue.doctorId !== doctorId ||
+            dbDateToDateOnly(existingQueue.queueDate) !== targetQueueDateOnly),
+      );
+      if (queueMovesLogicalQueue) {
+        // A doctor/date change carries the row's existing position into a
+        // different queue. Re-allocate it under the same lock walk-ins use so
+        // the target queue cannot end up with two identical positions.
+        await acquireQueueAllocationLock(tx, doctorId, targetQueueDateOnly);
+      }
+
       const overlap = await findOverlap(tx, doctorId, startAt, endAt, id);
       if (overlap) {
         throw conflict('This doctor already has an appointment during that time.', {
@@ -449,11 +471,17 @@ appointmentsRouter.patch(
       });
 
       if (updated.queueEntry) {
+        const targetQueueDate = dateOnlyToDb(targetQueueDateOnly);
+        const movedPosition =
+          queueMovesLogicalQueue && existingQueue?.position != null
+            ? await allocateQueuePosition(tx, doctorId, targetQueueDate, existingQueue.id)
+            : null;
         await tx.queueEntry.update({
           where: { id: updated.queueEntry.id },
           data: {
             doctorId,
-            queueDate: new Date(`${clinicDateString(startAt)}T00:00:00.000Z`),
+            queueDate: targetQueueDate,
+            ...(movedPosition === null ? {} : { position: movedPosition }),
           },
         });
       }
