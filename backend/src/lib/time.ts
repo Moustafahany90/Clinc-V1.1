@@ -149,4 +149,4 @@ export function minutesToLabel(minutes: number): string {
   return `${hh}:${mm}`;
 }
 
-export const DEFAULT_APP_ORIGIN = env.APP_ORIGIN;
+export const DEFAULT_APP_ORIGIN = env.publicOrigin;

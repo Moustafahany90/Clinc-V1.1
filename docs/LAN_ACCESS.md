@@ -55,7 +55,7 @@ Internet (Direct/Public) ────(Blocked)─────────▶ 192
 | `deploy/clinic.service` | Systemd unit template resolving Tailscale IP startup dependency and startup ordering |
 | `.env.example` | Contains `LAN_IP` and `LAN_HOST` configuration examples |
 
-No database, backend, or application code is modified.
+No database or schema change is required. The only application change is link-origin selection in `backend/src/lib/invites.ts`: generated setup links use the canonical (first) `APP_ORIGIN` instead of the raw comma-separated list.
 
 ---
 
@@ -67,9 +67,12 @@ Configure these in the server's protected environment file (e.g. `/etc/clinic/cl
 |---|---|---|
 | `LAN_IP` | `192.168.1.11` | Server's physical LAN IPv4 (`eno1`), used for Docker host port binding |
 | `LAN_HOST` | `192.168.1.11` | IP address used for Caddy site block, IP SAN, and `default_sni` |
-| `APP_ORIGIN` | `https://<CLINIC_DOMAIN>,https://192.168.1.11` | Comma-separated list of approved HTTPS origins for CORS and cookie origin checks |
+| `APP_ORIGIN` | `https://<CLINIC_DOMAIN>,https://192.168.1.11` | Comma-separated list of approved HTTPS origins for CORS; the first entry is canonical and is used for generated links |
 
-Existing variables (`CLINIC_DOMAIN`, `TAILSCALE_IP`, `TAILSCALE_CERT_DIR`, `COOKIE_SECURE=true`, etc.) must remain unchanged.
+Existing variables (`CLINIC_DOMAIN`, `TAILSCALE_IP`, `TAILSCALE_CERT_DIR`, `COOKIE_SECURE=true`, etc.) must remain unchanged. `COOKIE_DOMAIN` must stay empty so the refresh cookie is also sent when browsing the LAN IP.
+
+> [!IMPORTANT]
+> Keep `/opt/clinic/.env` (read by Docker Compose) and `/etc/clinic/clinic.env` (read by `clinic.service` via `EnvironmentFile=`) consistent. Values supplied by systemd take precedence over `.env`, so a missing or stale `LAN_IP`, `LAN_HOST`, or `APP_ORIGIN` in `/etc/clinic/clinic.env` will silently override the correct values in `.env` once the service is installed.
 
 ---
 

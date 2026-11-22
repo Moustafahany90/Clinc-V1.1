@@ -21,10 +21,12 @@
 # CORS whitelist accepts requests from either entry point. COOKIE_SECURE=true
 # is satisfied because both paths use HTTPS.
 #
-# To trust the internal CA on clinic devices, export the root certificate:
-#   docker compose exec caddy caddy trust        # (installs on the host)
+# To trust the internal CA on clinic Windows workstations, export the public
+# root certificate from the container (never the private key):
 #   docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt
-# Then install that root certificate on each clinic phone/PC.
+# Then install it on each authorized clinic Windows workstation, as documented
+# in docs/LAN_ACCESS.md. `caddy trust` inside the container does not install
+# the certificate into the host or workstation trust stores.
 {
 	auto_https disable_redirects
 	admin 127.0.0.1:2019

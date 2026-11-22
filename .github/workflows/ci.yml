@@ -161,3 +161,42 @@ jobs:
 
       - name: Classify audit result
         run: node scripts/dependency-audit.mjs "$RUNNER_TEMP/backend-audit.json"
+
+  deployment-config:
+    name: Deployment overlays and Caddyfile syntax
+    runs-on: ubuntu-latest
+    env:
+      CLINIC_DOMAIN: clinic.example.ts.net
+      TAILSCALE_IP: 100.64.0.1
+      TAILSCALE_CERT_DIR: /etc/clinic/tailscale-certs
+      LAN_IP: 192.168.1.11
+      LAN_HOST: 192.168.1.11
+      APP_ORIGIN: https://clinic.example.ts.net,https://192.168.1.11
+      POSTGRES_PASSWORD: ci-test-only-password
+      JWT_ACCESS_SECRET: ci-access-secret-0123456789abcdef0123456789
+      JWT_REFRESH_SECRET: ci-refresh-secret-0123456789abcdef0123456789
+      EVOLUTION_API_KEY: ci-test-only-key
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate Tailscale + LAN Compose overlays
+        run: |
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.tailscale.yml \
+            -f docker-compose.lan.yml \
+            config --quiet
+
+      - name: Validate Caddyfiles
+        run: |
+          docker run --rm \
+            -v "$PWD/deploy/Caddyfile.tailscale:/etc/caddy/Caddyfile:ro" \
+            -e CLINIC_DOMAIN \
+            caddy:2.11-alpine \
+            caddy adapt --config /etc/caddy/Caddyfile --validate >/dev/null
+          docker run --rm \
+            -v "$PWD/deploy/Caddyfile.dual:/etc/caddy/Caddyfile:ro" \
+            -e CLINIC_DOMAIN -e LAN_HOST \
+            caddy:2.11-alpine \
+            caddy adapt --config /etc/caddy/Caddyfile --validate >/dev/null

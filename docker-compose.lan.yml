@@ -9,9 +9,10 @@
 #     -f docker-compose.lan.yml up -d --build
 #
 # This overlay extends the Tailscale Caddy service to also listen on the
-# server's LAN IP, serving clinic devices (phones, PCs) over HTTPS using
-# Caddy's internal CA. It replaces the Tailscale-only Caddyfile with the
-# dual-access Caddyfile that serves both Tailscale and LAN site blocks.
+# server's LAN IP, serving authorized clinic Windows workstations over HTTPS
+# using Caddy's internal CA. Remote users and all mobile devices continue to
+# access the system through Tailscale. It replaces the Tailscale-only Caddyfile
+# with the dual-access Caddyfile that serves both Tailscale and LAN site blocks.
 #
 # Required .env additions (non-secret):
 #   LAN_IP=192.168.1.11          # Server's LAN IPv4 (from `ip -4 addr show eno1`)

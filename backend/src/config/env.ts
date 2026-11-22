@@ -163,16 +163,21 @@ if (!parsed.success) {
 
 const raw = parsed.data;
 
+const corsOrigins = raw.APP_ORIGIN.split(',')
+  .map((o) => o.trim())
+  .filter(Boolean)
+  .map((o) => new URL(o).origin);
+
 export const env = {
   ...raw,
   isProduction: raw.NODE_ENV === 'production',
   isTest: raw.NODE_ENV === 'test',
   refreshTokenTtlMs: raw.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000,
   maxUploadBytes: raw.MAX_UPLOAD_MB * 1024 * 1024,
-  corsOrigins: raw.APP_ORIGIN.split(',')
-    .map((o) => o.trim())
-    .filter(Boolean)
-    .map((o) => new URL(o).origin),
+  corsOrigins,
+  // Every configured origin is allowed for CORS, but links sent to users must
+  // use one canonical host. APP_ORIGIN documents the first value as canonical.
+  publicOrigin: corsOrigins[0] ?? raw.APP_ORIGIN,
 };
 
 export type Env = typeof env;

@@ -7,10 +7,13 @@ import test from 'node:test';
  * child process so process.exit() is observable without stopping the runner.
  */
 
-function loadEnv(overrides: Record<string, string>) {
+function loadEnv(
+  overrides: Record<string, string>,
+  expression = "import('./src/config/env.ts')",
+) {
   return spawnSync(
     process.execPath,
-    ['--import', 'tsx', '-e', "import('./src/config/env.ts')"],
+    ['--import', 'tsx', '-e', expression],
     {
       cwd: process.cwd(),
       env: {
@@ -65,4 +68,14 @@ test('a valid production configuration loads without exiting', () => {
   const result = loadEnv({});
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr.trim(), '');
+});
+
+test('generated links use the first APP_ORIGIN when several are configured', () => {
+  const result = loadEnv(
+    { APP_ORIGIN: 'https://clinic.example.com, https://192.168.1.11' },
+    "import('./src/config/env.ts').then(({ env }) => console.log(env.publicOrigin))",
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'https://clinic.example.com');
 });

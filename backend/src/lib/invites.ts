@@ -29,7 +29,9 @@ export async function issuePasswordSetup(
     },
   });
 
-  const url = `${env.APP_ORIGIN.replace(/\/$/, '')}/set-password?token=${encodeURIComponent(token)}`;
+  // APP_ORIGIN may list multiple CORS origins (e.g. Tailscale + LAN). Links
+  // must use the first/canonical origin, never the raw comma-separated value.
+  const url = `${env.publicOrigin.replace(/\/$/, '')}/set-password?token=${encodeURIComponent(token)}`;
   return { url };
 }
 
