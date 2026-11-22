@@ -190,13 +190,24 @@ jobs:
 
       - name: Validate Caddyfiles
         run: |
+          # caddy adapt --validate provisions the TLS app, so the Tailscale
+          # certificate files referenced by both Caddyfiles must exist. Generate
+          # a throwaway self-signed pair; CI never uses it for real traffic.
+          cert_dir="$(mktemp -d)"
+          openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "$cert_dir/$CLINIC_DOMAIN.key" \
+            -out "$cert_dir/$CLINIC_DOMAIN.crt" \
+            -days 1 -subj "/CN=$CLINIC_DOMAIN" \
+            -addext "subjectAltName=DNS:$CLINIC_DOMAIN" >/dev/null 2>&1
           docker run --rm \
             -v "$PWD/deploy/Caddyfile.tailscale:/etc/caddy/Caddyfile:ro" \
+            -v "$cert_dir:/etc/tailscale/certs:ro" \
             -e CLINIC_DOMAIN \
             caddy:2.11-alpine \
             caddy adapt --config /etc/caddy/Caddyfile --validate >/dev/null
           docker run --rm \
             -v "$PWD/deploy/Caddyfile.dual:/etc/caddy/Caddyfile:ro" \
+            -v "$cert_dir:/etc/tailscale/certs:ro" \
             -e CLINIC_DOMAIN -e LAN_HOST \
             caddy:2.11-alpine \
             caddy adapt --config /etc/caddy/Caddyfile --validate >/dev/null
