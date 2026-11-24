@@ -42,6 +42,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       target: build
+      args:
+        BUILD_SHA: ${BUILD_SHA:-unknown}
     restart: "no"
     command: ["npx", "prisma", "migrate", "deploy"]
     environment:
@@ -61,6 +63,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        BUILD_SHA: ${BUILD_SHA:-unknown}
     restart: unless-stopped
     depends_on:
       db:
@@ -124,6 +128,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-}
+        BUILD_SHA: ${BUILD_SHA:-unknown}
     restart: unless-stopped
     depends_on:
       backend:

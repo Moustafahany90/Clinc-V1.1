@@ -16,6 +16,7 @@ RUN apt-get update \
 # Build stage: also used by the `migrate` compose service (has prisma CLI).
 # ---------------------------------------------------------------------------
 FROM base AS build
+ARG BUILD_SHA=unknown
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY prisma ./prisma
@@ -28,8 +29,11 @@ RUN npm run build
 # Runtime
 # ---------------------------------------------------------------------------
 FROM base AS runtime
+ARG BUILD_SHA=unknown
 ENV NODE_ENV=production
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# Baked into the image so /healthz reports the exact deployed commit.
+ENV BUILD_SHA=$BUILD_SHA
 COPY package.json package-lock.json ./
 # @prisma/client declares the Prisma CLI as an optional peer, so npm installs the
 # CLI (and its engine/fetch tooling) even with --omit=dev. The running API only

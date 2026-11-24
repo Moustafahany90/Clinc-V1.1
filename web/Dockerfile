@@ -16,7 +16,9 @@ COPY src ./src
 
 ARG VITE_API_URL=
 ENV VITE_API_URL=$VITE_API_URL
-RUN npm run build
+ARG BUILD_SHA=unknown
+RUN npm run build \
+  && printf '%s' "$BUILD_SHA" > /app/dist/build-sha.txt
 
 # ---------------------------------------------------------------------------
 # Serve the SPA. No clinic data is stored or served from this container:

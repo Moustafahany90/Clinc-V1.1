@@ -131,12 +131,13 @@ ExecStartPre=/usr/bin/bash -c '\
     fi; \
   fi'
 
-# Start the Docker Compose stack with Tailscale and LAN overlays
-ExecStart=/usr/bin/docker compose \
+# Rebuild and start the Docker Compose stack with Tailscale and LAN overlays.
+# The wrapper stamps images with the checkout commit; plain `compose up` alone
+# would keep running images built from older source after a Git update.
+ExecStart=/usr/bin/bash /opt/clinic/scripts/compose-up.sh \
   -f docker-compose.yml \
   -f docker-compose.tailscale.yml \
-  -f docker-compose.lan.yml \
-  up -d --remove-orphans
+  -f docker-compose.lan.yml
 
 # Stop the Compose stack cleanly — `down` removes containers and default network
 # for a clean state on restart.

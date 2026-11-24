@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from './lib/prisma.js';
 import { auditHealth } from './lib/audit.js';
+import { BUILD_SHA } from './lib/buildInfo.js';
 import { adminSessionsRouter, authRouter, sessionsRouter } from './modules/auth/routes.js';
 import { setupRouter } from './modules/setup/routes.js';
 import { usersRouter } from './modules/users/routes.js';
@@ -23,14 +24,19 @@ export const apiRouter = Router();
 
 apiRouter.get('/health', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ status: 'ok', service: 'ultrasound-clinic-api', uptime: process.uptime() });
+  res.json({
+    status: 'ok',
+    service: 'ultrasound-clinic-api',
+    uptime: process.uptime(),
+    buildSha: BUILD_SHA,
+  });
 });
 
 apiRouter.get('/health/db', async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ status: 'ok', database: 'reachable' });
+    res.json({ status: 'ok', database: 'reachable', buildSha: BUILD_SHA });
   } catch {
     res.status(503).json({ error: { code: 'SERVICE_UNAVAILABLE', message: 'Database unreachable.' } });
   }
@@ -51,6 +57,7 @@ async function readiness(res: import('express').Response): Promise<void> {
       database: 'reachable',
       uptime: process.uptime(),
       audit,
+      buildSha: BUILD_SHA,
     });
   } catch {
     res.status(503).json({
@@ -58,6 +65,7 @@ async function readiness(res: import('express').Response): Promise<void> {
       service: 'ultrasound-clinic-api',
       database: 'unreachable',
       audit,
+      buildSha: BUILD_SHA,
     });
   }
 }

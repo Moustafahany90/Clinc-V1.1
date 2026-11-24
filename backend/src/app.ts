@@ -7,6 +7,7 @@ import { env } from './config/env.js';
 import { apiRouter } from './routes.js';
 import { prisma } from './lib/prisma.js';
 import { auditHealth } from './lib/audit.js';
+import { BUILD_SHA } from './lib/buildInfo.js';
 import { log, safeRoute } from './lib/logger.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { apiLimiter } from './middleware/rateLimit.js';
@@ -95,6 +96,7 @@ export function createApp(): express.Express {
         database: 'reachable',
         uptime: process.uptime(),
         audit,
+        buildSha: BUILD_SHA,
       });
     } catch {
       res.status(503).json({
@@ -102,6 +104,7 @@ export function createApp(): express.Express {
         service: 'ultrasound-clinic-api',
         database: 'unreachable',
         audit,
+        buildSha: BUILD_SHA,
       });
     }
   });
