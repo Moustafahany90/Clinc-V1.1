@@ -124,6 +124,11 @@ MAIN_SHA="$(git ls-remote "$REPO_URL" refs/heads/main | awk 'NR==1 {print $1}')"
 [ "$MAIN_SHA" = "$COMMIT" ] || die "commit $COMMIT is not the current GitHub main tip ($MAIN_SHA)"
 pass "GitHub main tip matches the pinned commit"
 
+# Stamp every image with the exact deployed commit so operators can verify it
+# from /healthz and /build-sha.txt without trusting Git state on the host.
+export BUILD_SHA="$COMMIT"
+pass "image build stamp set to $COMMIT"
+
 # --- Tailnet bind address ---------------------------------------------------
 if command -v tailscale >/dev/null 2>&1; then
   TAILSCALE_IP="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"

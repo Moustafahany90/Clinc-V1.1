@@ -334,6 +334,28 @@ curl --fail --silent --show-error --cacert clinic-internal-ca.crt "https://192.1
 curl --fail --silent --show-error "https://$CLINIC_DOMAIN/healthz"
 ```
 
+### 8.1 Verify the deployed commit
+
+Both images are stamped with the commit they were built from. Compare the API
+and SPA stamps with the checkout on the server; all three must match:
+
+```bash
+# API stamp (from the backend image)
+curl --fail --silent --show-error --cacert clinic-internal-ca.crt \
+  "https://192.168.1.11/api/v1/health" | grep -o '"buildSha":"[^"]*"'
+
+# SPA stamp (from the web image)
+curl --fail --silent --show-error --cacert clinic-internal-ca.crt \
+  "https://192.168.1.11/build-sha.txt"; echo
+
+# Source stamp on the server
+sudo git -C /opt/clinic rev-parse HEAD
+```
+
+A Git checkout alone is not proof of deployment: `docker compose up` without
+`--build` keeps the old images. Use `scripts/compose-up.sh` (also called by
+`clinic.service`) for updates so the stamp follows the source.
+
 ---
 
 ## 9. Rollback Procedure

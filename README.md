@@ -101,6 +101,9 @@ drift, runs the test suite, and builds both apps.
 
 - Production TLS, monitoring, log rotation, backup schedule, and the restore
   drill are documented in [docs/operations.md](docs/operations.md).
+- To verify which commit is actually running, compare `buildSha` from
+  `/api/v1/health` and `/build-sha.txt` with the server's Git HEAD; see
+  [LAN access verification](docs/LAN_ACCESS.md#81-verify-the-deployed-commit).
 - Optional WhatsApp PDF delivery is manual, finalized-report-only and disabled
   by default; setup, consent and template requirements are in
   [docs/operations.md](docs/operations.md#whatsapp-report-delivery).

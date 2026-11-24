@@ -242,6 +242,7 @@ test('health is database-aware and reports audit write failures', async () => {
   assert.equal(health.body.status, 'ok');
   assert.equal(health.body.database, 'reachable');
   assert.equal(typeof health.body.audit.writeFailures, 'number');
+  assert.equal(typeof health.body.buildSha, 'string');
 });
 
 test('mustChangePassword is enforced by the API, not only the SPA', async () => {
