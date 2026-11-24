@@ -208,8 +208,6 @@ export function PatientDetailPage() {
 
       <div className="flex flex-wrap items-center gap-2">
         {!patient.isActive && <Badge tone="danger">Inactive patient</Badge>}
-        {patient.gender && <Badge tone="muted">{patient.gender.toLowerCase()}</Badge>}
-        {patient.nationalId && <Badge tone="muted">ID {patient.nationalId}</Badge>}
         <Badge tone="brand">{appointments.length} appointments</Badge>
         {clinical && <Badge tone="info">{visits.length} visits</Badge>}
         {billing && ledger && (
@@ -254,9 +252,6 @@ export function PatientDetailPage() {
                   {formatDateOnly(patient.dateOfBirth)}
                   {patient.dateOfBirth ? ` · ${ageFromDob(patient.dateOfBirth)}` : ''}
                 </KeyValue>
-                <KeyValue label="Gender">{patient.gender ?? '—'}</KeyValue>
-                <KeyValue label="National / ID number">{patient.nationalId ?? '—'}</KeyValue>
-                <KeyValue label="Address">{patient.address ?? '—'}</KeyValue>
                 <KeyValue label="Notes" className="sm:col-span-2">
                   <span className="whitespace-pre-wrap font-normal text-ink-700">
                     {patient.notes ?? '—'}
